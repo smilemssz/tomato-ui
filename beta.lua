@@ -873,13 +873,6 @@ function Library:CreateWindow(config)
 			return obj
 		end
 
-		return ui
-	end
-
-
-
-
-  		-- ============================================================
 		-- TagBox
 		-- ============================================================
 		-- Example:
@@ -991,6 +984,7 @@ function Library:CreateWindow(config)
 
 			if DESCRIPTION ~= "" then
 				local desc = label(f, DESCRIPTION, {
+					Name = "Description",
 					Position = UDim2.new(0, PAD, 0, titleY + 19),
 					Size = UDim2.new(1, -PAD * 2, 0, 28),
 					TextColor3 = GRAY,
@@ -1402,6 +1396,13 @@ function Library:CreateWindow(config)
 
   
 
+		return ui
+	end
+
+
+
+
+  		-- ============================================================
 	-- ==================== Create pages (internal) ====================
 	local function makePage(name, hasTab)
 		local e = {name = name, active = false, anims = {}}
