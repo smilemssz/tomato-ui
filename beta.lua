@@ -1,5 +1,5 @@
 -- ============================================================
---  Tomato UI Library
+--  Tomato UI Library V.0.0.1 beta
 -- ============================================================
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
@@ -1775,7 +1775,7 @@ function Library:CreateWindow(config)
 		s:Button("Kill UI", function()
 			confirm("Kill UI?", "Close and completely remove this UI", kill)
 		end, RED)
-		s:Label(NAME .. " • Tomato UI Library")
+		s:Label(NAME .. " • Tomato UI Library • version 0.0.1 beta")
 	end
 
 	-- ==================== Drag system (X-axis + smooth damping) ====================
