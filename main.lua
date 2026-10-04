@@ -8,7 +8,7 @@ local TweenService = game:GetService("TweenService")
 
 local Library = {}
 
--- ==================== ค่าคงที่ / ตัวช่วยกลาง ====================
+-- ==================== Constants / Core Helpers ====================
 
 local QUAD_OUT  = Enum.EasingStyle.Quad
 local FX_TWEEN  = TweenInfo.new(0.15, QUAD_OUT, Enum.EasingDirection.Out)
@@ -25,7 +25,7 @@ local ROW_H, PAD, ROW_BASE = 24, 6, 0.9
 
 local running = setmetatable({}, {__mode = "k"})
 
--- tween แยกตาม "ช่อง" ต่อ instance สั่งซ้ำช่องเดิมจะยกเลิกอันเก่าให้
+-- Separate tweens by channel per instance; repeating the same channel cancels the previous tween
 local function tw(inst, channel, info, goal)
 	running[inst] = running[inst] or {}
 	local old = running[inst][channel]
@@ -36,7 +36,7 @@ local function tw(inst, channel, info, goal)
 	return t
 end
 
--- hover / กด: จางเข้มขึ้น + ตัวอักษรหดนิดๆ
+-- hover / press: become darker + slightly shrink the text
 local function addButtonFx(btn, getBase, textSize, bgTarget, textTarget)
 	bgTarget = bgTarget or btn
 	textTarget = textTarget or (btn:IsA("TextButton") and btn or nil)
@@ -65,7 +65,7 @@ local function addButtonFx(btn, getBase, textSize, bgTarget, textTarget)
 	return apply
 end
 
--- จางเข้าตอน intro
+-- Fade in during intro
 local function popIn(obj, delay)
 	local info = TweenInfo.new(0.35, QUAD_OUT, Enum.EasingDirection.Out, 0, false, delay or 0)
 	if obj.BackgroundTransparency < 1 then
@@ -89,7 +89,7 @@ end
 
 local function round4(v) return math.round(v * 10000) / 10000 end
 
--- สร้าง Instance พร้อมค่าเริ่มต้นที่ใช้บ่อย
+-- Create Instances with commonly used defaults
 local function mk(class, props, parent)
 	local o = Instance.new(class)
 	if o:IsA("GuiObject") then o.BorderSizePixel = 0 end
@@ -118,7 +118,7 @@ local function round(frame)
 	mk("UICorner", {CornerRadius = UDim.new(1, 0)}, frame)
 end
 
--- ปุ่มใสทับ ไว้รับคลิก/ลาก
+-- Transparent overlay for click/drag input
 local function overlay(parent)
 	return mk("TextButton", {BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 10}, parent)
 end
@@ -126,10 +126,10 @@ end
 -- ============================================================
 --  Library:CreateWindow
 --  config = {
---      Name   = "ชื่อ UI",
---      Accent = Color3 (สีหลักเริ่มต้น),
---      Hotkey = Enum.KeyCode (ปุ่มซ่อน/แสดง UI เริ่มต้น),
---      OnKill = function() end (เรียกตอนกด Kill UI ไว้เคลียร์ลูปของสคริปต์คุณ),
+--      Name   = "UI name",
+--      Accent = Color3 (initial accent color),
+--      Hotkey = Enum.KeyCode (default UI hide/show key),
+--      OnKill = function() end (called when Kill UI is pressed to clean up your script loops),
 --  }
 -- ============================================================
 function Library:CreateWindow(config)
@@ -151,20 +151,20 @@ function Library:CreateWindow(config)
 	screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	screenGui.Parent = playerGui
 
-	-- connection ที่ต้องตัดทิ้งตอน UI ถูกลบ
+	-- connections to disconnect when the UI is removed
 	local connections = {}
 	screenGui.Destroying:Connect(function()
 		for _, c in ipairs(connections) do c:Disconnect() end
 		table.clear(connections)
 	end)
 
-	-- เลเยอร์บนสุดของจอ: popup / dialog / toast
+	-- topmost screen layer: popup / dialog / toast
 	local topLayer = mk("Frame", {
 		Name = "topLayer", BackgroundTransparency = 1,
 		Size = UDim2.fromScale(1, 1), ZIndex = 100,
 	}, screenGui)
 
-	-- ---------- ระบบสีหลัก ----------
+	-- ---------- Accent color system ----------
 	local accentFns = {}
 	local function bindAccent(fn)
 		table.insert(accentFns, fn)
@@ -175,7 +175,7 @@ function Library:CreateWindow(config)
 		for _, fn in ipairs(accentFns) do fn(c) end
 	end
 
-	-- ==================== ขนาด ====================
+	-- ==================== Size ====================
 	local BOTTOM, RIGHT, WIDTH = 0, 0, 211
 	local TITLE_HEIGHT = 19
 	local TAB_HEIGHT = 17
@@ -183,7 +183,7 @@ function Library:CreateWindow(config)
 	local BODY_HEIGHT = TAB_HEIGHT + PAGES_HEIGHT
 	local EXPANDED_HEIGHT = TITLE_HEIGHT + BODY_HEIGHT
 
-	-- ค่าเลื่อนแนวตั้งของหน้าต่าง (ใช้ทำ slide เข้า/ออก)
+	-- window vertical offset (used for slide in/out)
 	local slideY = Instance.new("NumberValue")
 	slideY.Parent = screenGui
 
@@ -272,7 +272,7 @@ function Library:CreateWindow(config)
 		ClipsDescendants = true, Size = UDim2.new(1, 0, 0, PAGES_HEIGHT),
 	}, body)
 
-	-- ==================== ระบบ Page ====================
+	-- ==================== Page system ====================
 	local TAB_ACTIVE_TRANSPARENCY = 0.1
 	local TAB_INACTIVE_TRANSPARENCY = 0.9
 	local TAB_TWEEN = TweenInfo.new(0.2, QUAD_OUT, Enum.EasingDirection.Out)
@@ -287,7 +287,7 @@ function Library:CreateWindow(config)
 	local settingsEntry, settingFx
 	local tabCount = 0
 
-	-- element ในหน้าทยอยโผล่
+	-- elements in the page revealed sequentially
 	local function playReveal(t)
 		for i, a in ipairs(t.anims) do
 			local inner = a.inner
@@ -353,7 +353,7 @@ function Library:CreateWindow(config)
 		playReveal(nextT)
 	end
 
-	-- ==================== Popup / drag ช่วยเหลือ ====================
+	-- ==================== Popup / drag helpers ====================
 	local popups = {}
 
 	local function inside(gui, p)
@@ -365,7 +365,7 @@ function Library:CreateWindow(config)
 		for _, o in ipairs(popups) do o.set(false) end
 	end
 
-	-- ลาก (เมาส์/นิ้ว) ปิดการเลื่อนหน้าระหว่างลาก
+	-- dragging (mouse/finger) disables page scrolling while dragging
 	local function dragify(hit, scroll, onMove, onActive)
 		local active = false
 		hit.InputBegan:Connect(function(input)
@@ -391,7 +391,7 @@ function Library:CreateWindow(config)
 		end))
 	end
 
-	-- popup ลอยที่เลเยอร์บนสุด (ไม่ดันแถวอื่น ไม่ถูกตัด)
+	-- floating popup on the topmost layer (does not push other rows or get clipped)
 	local function makePopup(header, h, scroll, pageFrame, onToggle)
 		local popup = mk("CanvasGroup", {
 			BackgroundColor3 = Color3.fromRGB(42, 42, 42),
@@ -457,7 +457,7 @@ function Library:CreateWindow(config)
 	end
 
 	-- ============================================================
-	--  newContainer: คอมโพเนนต์ทั้งหมดของหน้า
+	--  newContainer: all page components
 	-- ============================================================
 	local function newContainer(pageFrame, anims)
 		local scroll = mk("ScrollingFrame", {
@@ -479,7 +479,7 @@ function Library:CreateWindow(config)
 		local ui = {}
 		local order = 0
 
-		-- wrapper (อยู่ในเลย์เอาต์) + inner CanvasGroup (เล่น fade/slide)
+		-- wrapper (inside the layout) + inner CanvasGroup (plays fade/slide)
 		local function entry(h, props)
 			order += 1
 			local wrap = mk("Frame", {
@@ -835,7 +835,7 @@ function Library:CreateWindow(config)
 		end
 
 		-- ---------- Keybind ----------
-		-- allowClear = false: กด Esc แล้วไม่ล้างปุ่ม (ใช้กับปุ่มที่ห้ามว่าง)
+		-- allowClear = false: pressing Esc does not clear the key (for buttons that cannot be empty)
 		function ui:Keybind(text, default, cb, allowClear)
 			local f = entry(ROW_H)
 			label(f, text, {Position = UDim2.new(0, PAD, 0, 0), Size = UDim2.new(0.6, 0, 1, 0)})
@@ -876,7 +876,7 @@ function Library:CreateWindow(config)
 		return ui
 	end
 
-	-- ==================== สร้างหน้า (ภายใน) ====================
+	-- ==================== Create pages (internal) ====================
 	local function makePage(name, hasTab)
 		local e = {name = name, active = false, anims = {}}
 
@@ -903,7 +903,7 @@ function Library:CreateWindow(config)
 
 			button.MouseButton1Click:Connect(function() selectEntry(e) end)
 		else
-			e.order = 1000 -- หน้า Settings อยู่ "ขวาสุด" เสมอ (ใช้คิดทิศทางสไลด์)
+			e.order = 1000 -- Settings page is always on the far right (used to determine slide direction)
 		end
 
 		e.ui = newContainer(pageFrame, e.anims)
@@ -1116,8 +1116,8 @@ function Library:CreateWindow(config)
 		return dialog({
 			title = titleText, text = text,
 			buttons = {
-				{text = "ยกเลิก", callback = onNo},
-				{text = "ยืนยัน", primary = true, callback = onYes},
+				{text = "Cancel", callback = onNo},
+				{text = "Confirm", primary = true, callback = onYes},
 			},
 		})
 	end
@@ -1126,13 +1126,13 @@ function Library:CreateWindow(config)
 		return dialog({
 			title = titleText, text = text, input = placeholder or "",
 			buttons = {
-				{text = "ยกเลิก"},
-				{text = "ตกลง", primary = true, callback = onSubmit},
+				{text = "Cancel"},
+				{text = "OK", primary = true, callback = onSubmit},
 			},
 		})
 	end
 
-	-- ==================== หด/ขยาย ====================
+	-- ==================== Collapse/Expand ====================
 	local SIZE_TWEEN_OUT = TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
 	local FADE_TWEEN_OUT = TweenInfo.new(0.18, QUAD_OUT, Enum.EasingDirection.Out)
 	local FADE_TWEEN_IN  = TweenInfo.new(0.30, QUAD_OUT, Enum.EasingDirection.Out, 0, false, 0.08)
@@ -1181,7 +1181,7 @@ function Library:CreateWindow(config)
 		setCollapsed(not collapsed)
 	end)
 
-	-- ==================== ซ่อน/แสดง (Hotkey) และ Kill ====================
+	-- ==================== Hide/Show (Hotkey) and Kill ====================
 	local shown = true
 	local closing = false
 	local HIDE_TWEEN = TweenInfo.new(0.25, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
@@ -1225,7 +1225,7 @@ function Library:CreateWindow(config)
 		end)
 	end
 
-	-- ==================== หน้า Settings หลัก (ภายใน library เท่านั้น) ====================
+	-- ==================== Main Settings page (library internal only) ====================
 	settingsEntry = makePage("__settings", false)
 	settingFx = addButtonFx(setting, function()
 		return currentTab == settingsEntry and 0.6 or 0.9
@@ -1246,12 +1246,12 @@ function Library:CreateWindow(config)
 		s:ColorPicker("Main Color", accent, function(c) setAccent(c) end)
 		s:Divider()
 		s:Button("Kill UI", function()
-			confirm("Kill UI?", "ปิดและลบ UI นี้ทิ้งทั้งหมด", kill)
+			confirm("Kill UI?", "Close and completely remove this UI", kill)
 		end, RED)
 		s:Label(NAME .. " • Tomato UI Library")
 	end
 
-	-- ==================== ระบบลาก (แกน X + หน่วงนุ่มๆ) ====================
+	-- ==================== Drag system (X-axis + smooth damping) ====================
 	local SMOOTHNESS = 8
 	local dragging = false
 	local dragStartX, startOffsetX = 0, 0
@@ -1318,7 +1318,7 @@ function Library:CreateWindow(config)
 		if not closing then setCollapsed(false) end
 	end)
 
-	-- ==================== Window API (สิ่งเดียวที่สคริปต์ภายนอกเข้าถึงได้) ====================
+	-- ==================== Window API (the only thing accessible to external scripts) ====================
 	local Window = {}
 
 	function Window:AddPage(name)
