@@ -1,5 +1,6 @@
 -- ============================================================
---  Tomato UI Library V.0.0.1 beta
+--  Tomato UI Library V.0.0.1 beta 10/4/2026
+-- add support for TextBox, Progress, and Slider components
 -- ============================================================
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
