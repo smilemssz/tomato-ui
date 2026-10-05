@@ -1,5 +1,9 @@
 -- ============================================================
---  Tomato UI Library v2.0
+--  Tomato UI Library v2.1
+--  + 2.1+ family windows can communicate (Hub is shared across scripts)
+--  + Edge-snapped (mini) windows can stack like a cake up to 6 layers (can be disabled)
+--  + Window:PopupWindow  Windows-style draggable dialog
+--  + Lucide icons ("lucide:icon-name") from latte-soft/lucide-roblox
 -- ============================================================
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
@@ -7,9 +11,9 @@ local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local ScriptContext = game:GetService("ScriptContext")
 
-local Library = {Logs = {}, Version = "2.0"}
+local Library = {Logs = {}, Version = "2.1"}
 
--- ==================== ค่าคงที่ / ตัวช่วยกลาง ====================
+-- ==================== Constants / shared helpers ====================
 
 local QUAD_OUT   = Enum.EasingStyle.Quad
 local FX_TWEEN   = TweenInfo.new(0.15, QUAD_OUT, Enum.EasingDirection.Out)
@@ -27,7 +31,7 @@ local ROW_H, PAD, ROW_BASE = 24, 6, 0.9
 
 local running = setmetatable({}, {__mode = "k"})
 
--- tween แยกตาม "ช่อง" ต่อ instance สั่งซ้ำช่องเดิมจะยกเลิกอันเก่าให้
+-- tweens are separated by "channel" per instance; reusing the same channel cancels the previous tween
 local function tw(inst, channel, info, goal)
 	running[inst] = running[inst] or {}
 	local old = running[inst][channel]
@@ -38,7 +42,7 @@ local function tw(inst, channel, info, goal)
 	return t
 end
 
--- hover / กด: จางเข้มขึ้น + ตัวอักษรหดนิดๆ
+-- hover / press: becomes darker + text shrinks slightly
 local function addButtonFx(btn, getBase, textSize, bgTarget, textTarget)
 	bgTarget = bgTarget or btn
 	textTarget = textTarget or (btn:IsA("TextButton") and btn or nil)
@@ -91,7 +95,7 @@ end
 local function round4(v) return math.round(v * 10000) / 10000 end
 local function lerp(a, b, t) return a + (b - a) * t end
 
--- รับ id ตัวเลข / "123" / "rbxassetid://123" / url
+-- accepts numeric ID / "123" / "rbxassetid://123" / URL
 local function toImage(v)
 	if type(v) == "number" then return "rbxassetid://" .. v end
 	v = tostring(v or "")
@@ -131,7 +135,7 @@ local function overlay(parent)
 	return mk("TextButton", {BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 10}, parent)
 end
 
--- เทียบ key: string / table ของ string / function(key) -> bool
+-- match key: string / table of strings / function(key) -> bool
 local function matchKey(spec, input)
 	input = tostring(input or "")
 	if type(spec) == "function" then
@@ -150,7 +154,7 @@ local function getClipboard()
 	return setclipboard or toclipboard
 end
 
--- ==================== Error Log (popup ดู/คัดลอกได้) ====================
+-- ==================== Error Log (view/copy popup) ====================
 
 local logGui, logBox, logTitle
 
@@ -200,7 +204,6 @@ local function showLog()
 			PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4),
 			PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 4),
 		}, sc)
-		-- TextBox แบบอ่านอย่างเดียว เลือกข้อความคัดลอกเองได้
 		logBox = mk("TextBox", {
 			Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
 			BackgroundTransparency = 1, TextWrapped = true, TextEditable = false,
@@ -231,9 +234,9 @@ local function showLog()
 		copyB.MouseButton1Click:Connect(function()
 			local f = getClipboard()
 			if f and pcall(f, table.concat(Library.Logs, "\n\n")) then
-				copyB.Text = "คัดลอกแล้ว"
+				copyB.Text = "Copied"
 			else
-				copyB.Text = "เลือกข้อความเอง"
+				copyB.Text = "Select text manually"
 			end
 			task.delay(1.4, function() copyB.Text = "Copy" end)
 		end)
@@ -263,7 +266,7 @@ local function errHandler(e)
 	return tostring(e) .. "\n" .. debug.traceback("", 2)
 end
 
--- เรียก callback แบบกัน error: ถ้าพังจะขึ้น Error Log แทนที่จะทำให้สคริปต์หยุด
+-- call callbacks safely: errors are shown in Error Log instead of stopping the script
 local function call(tag, fn, ...)
 	if type(fn) ~= "function" then return end
 	local ok, err = xpcall(fn, errHandler, ...)
@@ -273,23 +276,154 @@ end
 Library.LogError = logError
 Library.ShowLog = showLog
 
--- รันฟังก์ชันของคุณแบบกัน error: Library:Protect(function() ... end)
 function Library:Protect(fn, ...)
 	local ok, err = xpcall(fn, errHandler, ...)
 	if not ok then logError("Script", err) end
 	return ok
 end
 
+-- ==================== Lucide icons (latte-soft/lucide-roblox) ====================
+-- works anywhere an image is accepted: "lucide:settings", "lucide:home", etc.
+-- by default loads from the latest release; to change the source: Library:SetIconSource(url or module)
+
+local ICON_URL = "https://github.com/latte-soft/lucide-roblox/releases/latest/download/lucide-roblox.luau"
+local Lucide, lucideTried
+
+function Library:SetIconSource(src)
+	if type(src) == "table" then
+		Lucide, lucideTried = src, true
+	elseif type(src) == "string" then
+		ICON_URL, Lucide, lucideTried = src, nil, nil
+	end
+end
+
+local function loadLucide()
+	if Lucide or lucideTried then return Lucide end
+	lucideTried = true
+	local ok, res = pcall(function()
+		return loadstring(game:HttpGet(ICON_URL))()
+	end)
+	if ok and type(res) == "table" and res.GetAsset then
+		Lucide = res
+	else
+		logError("Icons", "Failed to load Lucide: " .. tostring(res))
+	end
+	return Lucide
+end
+
+-- set images for ImageLabel/ImageButton; supports both ID/URL and "lucide:name"
+local function setImg(obj, spec, px)
+	obj.ImageRectOffset = Vector2.zero
+	obj.ImageRectSize = Vector2.zero
+	if type(spec) == "string" and spec:sub(1, 7) == "lucide:" then
+		local L = loadLucide()
+		if L then
+			local ok, asset = pcall(L.GetAsset, spec:sub(8), (px or 24) <= 48 and 48 or 256)
+			if ok and asset then
+				obj.Image = asset.Url
+				obj.ImageRectOffset = asset.ImageRectOffset
+				obj.ImageRectSize = asset.ImageRectSize
+				return true
+			end
+			logError("Icons", "Icon not found: " .. spec)
+		end
+		obj.Image = ""
+		return false
+	end
+	obj.Image = toImage(spec)
+	return true
+end
+
+function Library:GetIcon(name, size)
+	local L = loadLucide()
+	if not L then return nil end
+	local ok, a = pcall(L.GetAsset, name, size or 48)
+	return ok and a or nil
+end
+
+function Library:IconNames()
+	local L = loadLucide()
+	return L and L.IconNames or {}
+end
+
+-- ==================== Hub: let 2.1+ windows communicate + cake stacking ====================
+-- uses a shared global table, so windows can communicate even when the library is loaded by different scripts
+
+local env = (getgenv and getgenv()) or _G
+local Hub = env.__TomatoHub21
+if not Hub then
+	Hub = {
+		Version = "2.1", windows = {}, shared = {}, MAX_STACK = 6,
+		piles = {left = {list = {}}, right = {list = {}}, top = {list = {}}, bottom = {list = {}}},
+	}
+	env.__TomatoHub21 = Hub
+end
+
+local function hubRegister(ctrl)
+	Hub.windows[ctrl.name] = ctrl
+end
+
+local function pileLeave(ctrl)
+	for _, pile in pairs(Hub.piles) do
+		local i = table.find(pile.list, ctrl)
+		if i then
+			table.remove(pile.list, i)
+			if #pile.list == 0 then pile.anchor = nil end
+		end
+	end
+end
+
+local function pileJoin(ctrl, edge, anchor)
+	local pile = Hub.piles[edge]
+	if table.find(pile.list, ctrl) then return true end
+	if #pile.list >= Hub.MAX_STACK then return false end
+	if #pile.list == 0 then pile.anchor = anchor end
+	table.insert(pile.list, ctrl)
+	return true
+end
+
+local function hubUnregister(ctrl)
+	if Hub.windows[ctrl.name] == ctrl then Hub.windows[ctrl.name] = nil end
+	pileLeave(ctrl)
+end
+
+-- send message: target = window name, or nil = send to every window except itself
+local function hubDeliver(from, target, topic, ...)
+	local args = table.pack(...)
+	for name, ctrl in pairs(Hub.windows) do
+		if (target == nil and name ~= from) or (target ~= nil and name == target) then
+			task.spawn(ctrl.deliver, from, topic, table.unpack(args, 1, args.n))
+		end
+	end
+end
+
+local function hubInvoke(from, target, name, ...)
+	local c = Hub.windows[target]
+	if not c then return false, "Window not found: " .. tostring(target) end
+	local f = c.exposed[name]
+	if not f then return false, "Not Exposed: " .. tostring(name) end
+	return pcall(f, from, ...)
+end
+
+local function hubSetShared(from, key, value)
+	Hub.shared[key] = value
+	for _, ctrl in pairs(Hub.windows) do
+		local hs = ctrl.sharedHandlers[key]
+		if hs then
+			for _, fn in ipairs(hs) do task.spawn(call, "Shared " .. tostring(key), fn, value, from) end
+		end
+	end
+end
+
+function Library:GetWindows()
+	local t = {}
+	for name in pairs(Hub.windows) do table.insert(t, name) end
+	table.sort(t)
+	return t
+end
+
 -- ============================================================
 --  Library:KeySystem
---  cfg = {
---      Name = "ชื่อ", Description = "คำอธิบาย", Accent = Color3,
---      Url = "ลิงก์รับ key", GetKeyText = "getkey", CheckText = "Check Key",
---      Key = "abc" | Keys = {"a","b"} | Validate = function(key) return bool end,
---      SaveFile = "tomato_key.txt" (ไม่ใส่ = ไม่บันทึก),
---      OnSuccess = function(key) end, OnClose = function() end,
---  }
---  คืนค่า true เมื่อ key ถูก, false เมื่อผู้ใช้ปิดหน้าต่าง (รอจนกว่าจะเสร็จ)
 -- ============================================================
 function Library:KeySystem(cfg)
 	cfg = cfg or {}
@@ -304,7 +438,6 @@ function Library:KeySystem(cfg)
 		return matchKey(cfg.Keys or cfg.Key, k)
 	end
 
-	-- key ที่เคยบันทึกไว้
 	if cfg.SaveFile then
 		local ok, saved = pcall(function()
 			if isfile and readfile and isfile(cfg.SaveFile) then return readfile(cfg.SaveFile) end
@@ -370,7 +503,7 @@ function Library:KeySystem(cfg)
 		local input = mk("TextBox", {
 			LayoutOrder = 4, Size = UDim2.new(1, 0, 0, 24), TextSize = 13,
 			BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.6,
-			PlaceholderText = "ใส่ Key ที่นี่...", PlaceholderColor3 = GRAY,
+			PlaceholderText = "Enter Key here...", PlaceholderColor3 = GRAY,
 			ClearTextOnFocus = false, TextXAlignment = Enum.TextXAlignment.Left, ClipsDescendants = true,
 		}, card)
 		mk("UIPadding", {PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6)}, input)
@@ -421,9 +554,9 @@ function Library:KeySystem(cfg)
 			if not cfg.Url then return end
 			local f = getClipboard()
 			if f and pcall(f, cfg.Url) then
-				setStatus("คัดลอกลิงก์แล้ว นำไปเปิดในเบราว์เซอร์", GREEN)
+				setStatus("Link copied; open it in your browser", GREEN)
 			else
-				setStatus("คัดลอกลิงก์จากช่องด้านบนเอง", GRAY)
+				setStatus("Copy the link from the field above manually", GRAY)
 			end
 		end)
 
@@ -431,18 +564,18 @@ function Library:KeySystem(cfg)
 		local function doCheck()
 			if busy or result ~= nil then return end
 			busy = true
-			setStatus("กำลังตรวจสอบ...", GRAY)
+			setStatus("Checking...", GRAY)
 			task.spawn(function()
 				local key = input.Text
 				local good = check(key)
 				busy = false
 				if good then
-					setStatus("สำเร็จ", GREEN)
+					setStatus("Success", GREEN)
 					if cfg.SaveFile and writefile then pcall(writefile, cfg.SaveFile, key) end
 					finish(true)
 					call("KeySystem.OnSuccess", cfg.OnSuccess, key)
 				else
-					setStatus(cfg.WrongText or "Key ไม่ถูกต้อง", RED)
+					setStatus(cfg.WrongText or "Invalid key", RED)
 					shake()
 				end
 			end)
@@ -471,10 +604,8 @@ end
 -- ============================================================
 --  Library:CreateWindow
 --  config = {
---      Name = "ชื่อ UI", Accent = Color3, Hotkey = Enum.KeyCode,
---      OnKill = function() end,
---      NotifyDuration = 3,          -- ค่าเริ่มต้นของการแจ้งเตือน (วินาที)
---      CatchAllErrors = false,      -- true = ดัก error ทุกอย่างจาก ScriptContext เข้า Error Log
+--      Name, Accent, Hotkey, OnKill, NotifyDuration, CatchAllErrors,
+--      Stack = true   -- enable/disable cake stacking when edge-snapped (can also be changed in Settings)
 --  }
 -- ============================================================
 local function createWindow(config)
@@ -483,6 +614,7 @@ local function createWindow(config)
 	local accent = config.Accent or Color3.fromRGB(255, 99, 71)
 	local hotkey = config.Hotkey or Enum.KeyCode.RightShift
 	local defaultDuration = config.NotifyDuration or 3
+	local stackEnabled = config.Stack ~= false
 
 	local player = Players.LocalPlayer
 	local playerGui = player:WaitForChild("PlayerGui")
@@ -508,10 +640,24 @@ local function createWindow(config)
 		end))
 	end
 
-	-- เลเยอร์บนสุดของจอ: popup ของ Dropdown/ColorPicker, dialog, toast
+	-- ---------- window controller in the Hub (cross-window communication) ----------
+	local ctrl = {name = NAME, handlers = {}, exposed = {}, sharedHandlers = {}}
+	function ctrl.deliver(from, topic, ...)
+		local hs = ctrl.handlers[topic]
+		if not hs then return end
+		for _, fn in ipairs(hs) do call("On " .. tostring(topic), fn, from, ...) end
+	end
+	hubRegister(ctrl)
+	screenGui.Destroying:Connect(function()
+		hubUnregister(ctrl)
+		hubDeliver(NAME, nil, "WindowRemoved", NAME)
+	end)
+
+	-- top screen layer: Dropdown/ColorPicker popups, dialogs, toasts, PopupWindow
+	-- ZIndex order: PopupWindow 2-45 < floating popup 50 < toast 60 < dialog 70
 	local topLayer = mk("Frame", {Name = "topLayer", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 100}, screenGui)
 
-	-- ---------- ระบบสีหลัก ----------
+	-- ---------- accent color system ----------
 	local accentFns = {}
 	local function bindAccent(fn)
 		table.insert(accentFns, fn)
@@ -522,14 +668,14 @@ local function createWindow(config)
 		for _, fn in ipairs(accentFns) do fn(c) end
 	end
 
-	-- ==================== ขนาด / สถานะ ====================
+	-- ==================== size / state ====================
 	local RIGHT, BOTTOM, WIDTH = 0, 0, 211
 	local TITLE_HEIGHT, TAB_HEIGHT, PAGES_HEIGHT = 19, 17, 219
 	local DOCK_BODY = TAB_HEIGHT + PAGES_HEIGHT
 	local MIN_W, MIN_H = 170, TITLE_HEIGHT + TAB_HEIGHT + 90
 
-	local SNAP_SCALE = 0.75 -- ขนาดตอนชิดขอบ (0.75 = หด 25%)
-	local SNAP_PEEK  = 0.25 -- ส่วนที่โผล่พ้นขอบจอ (0.25 = โผล่ 25%)
+	local SNAP_SCALE = 0.75 -- size when edge-snapped (0.75 = shrunk by 25%)
+	local SNAP_PEEK  = 0.25 -- portion visible beyond the screen edge (0.25 = 25% visible)
 	local EDGE, MARGIN = 6, 12
 	local SMOOTHNESS = 8
 	local ICON_DOCK, ICON_WINDOW = "□", "▭"
@@ -545,11 +691,12 @@ local function createWindow(config)
 	local mode = "dock"
 	local dockTX, dockCX = -RIGHT, -RIGHT
 	local winInit = false
-	local winX, winY, winW, winH = 0, 0, 260, 300 -- ตำแหน่ง/ขนาดล่าสุดของ window mode
+	local winX, winY, winW, winH = 0, 0, 260, 300
 	local winCX, winCY = 0, 0
 	local snapped, snapEdge = false, nil
+	local inPile, stackedCollapse = false, false
 
-	-- ==================== โครงหน้าต่าง ====================
+	-- ==================== window structure ====================
 	local main = mk("CanvasGroup", {
 		Name = "main", AnchorPoint = Vector2.new(0, 0),
 		Size = UDim2.fromOffset(WIDTH, TITLE_HEIGHT),
@@ -615,7 +762,7 @@ local function createWindow(config)
 		ClipsDescendants = true, Size = UDim2.new(1, 0, 0, PAGES_HEIGHT),
 	}, body)
 
-	-- ==================== ระบบ Page ====================
+	-- ==================== Page system ====================
 	local TAB_ACTIVE_TRANSPARENCY, TAB_INACTIVE_TRANSPARENCY = 0.1, 0.9
 	local TAB_TWEEN = TweenInfo.new(0.2, QUAD_OUT, Enum.EasingDirection.Out)
 	local INSTANT = TweenInfo.new(0)
@@ -629,9 +776,9 @@ local function createWindow(config)
 	local settingsEntry, settingFx
 	local tabCount = 0
 
-	-- forward declaration (ประกาศไว้ก่อน ใช้ข้ามส่วนได้)
-	local notify, dialog, confirm, prompt, makeBodyPopup
-	local popups, bodyPopups = {}, {}
+	-- forward declaration
+	local notify, dialog, confirm, prompt, makeBodyPopup, makePopupWindow
+	local popups, bodyPopups, popupWins = {}, {}, {}
 
 	local function closeAllPopups()
 		for _, o in ipairs(popups) do o.set(false) end
@@ -676,6 +823,9 @@ local function createWindow(config)
 			t.active = (t == nextT)
 			t.fx(info)
 			tw(t.button, "color", info, {TextColor3 = t.active and ACTIVE_TEXT or WHITE})
+			if t.icon then
+				tw(t.icon, "color", info, {ImageColor3 = t.active and ACTIVE_TEXT or WHITE})
+			end
 		end
 		if settingFx then settingFx(info) end
 
@@ -704,13 +854,12 @@ local function createWindow(config)
 		playReveal(nextT)
 	end
 
-	-- ==================== ตัวช่วยสำหรับคอมโพเนนต์ ====================
+	-- ==================== component helpers ====================
 	local function inside(gui, p)
 		local a, s = gui.AbsolutePosition, gui.AbsoluteSize
 		return p.X >= a.X and p.X <= a.X + s.X and p.Y >= a.Y and p.Y <= a.Y + s.Y
 	end
 
-	-- ลาก (เมาส์/นิ้ว) ปิดการเลื่อนของ scroll ทุกตัวที่ครอบอยู่ระหว่างลาก
 	local function dragify(hit, scrolls, onMove, onActive)
 		local active = false
 		local function freeze(v)
@@ -739,11 +888,11 @@ local function createWindow(config)
 		end))
 	end
 
-	-- popup ลอยที่เลเยอร์บนสุด (ไม่ดันแถวอื่น ไม่ถูกตัด)
+	-- floating popup on the top layer (does not push other rows or get clipped)
 	local function makePopup(header, h, scrolls, visFrame, onToggle)
 		local popup = mk("CanvasGroup", {
 			BackgroundColor3 = Color3.fromRGB(42, 42, 42),
-			GroupTransparency = 1, Visible = false, Size = UDim2.fromOffset(0, h),
+			GroupTransparency = 1, Visible = false, ZIndex = 50, Size = UDim2.fromOffset(0, h),
 		}, topLayer)
 		mk("UIStroke", {Color = WHITE, Thickness = 1, Transparency = 0.85}, popup)
 
@@ -798,6 +947,7 @@ local function createWindow(config)
 			sc:GetPropertyChangedSignal("CanvasPosition"):Connect(function() st.set(false) end)
 		end
 		visFrame:GetPropertyChangedSignal("Visible"):Connect(function() st.set(false) end)
+		visFrame:GetPropertyChangedSignal("Position"):Connect(function() st.set(false) end)
 		body:GetPropertyChangedSignal("Visible"):Connect(function() st.set(false) end)
 		main:GetPropertyChangedSignal("Visible"):Connect(function() st.set(false) end)
 		main:GetPropertyChangedSignal("Position"):Connect(function() st.set(false) end)
@@ -805,7 +955,7 @@ local function createWindow(config)
 		return st
 	end
 
-	-- ล็อกคอมโพเนนต์: obj:Lock() = ล็อกเฉยๆ, obj:Lock("key") = ต้องใส่ key ถึงปลด, obj:Unlock()
+	-- component lock
 	local function attachLock(f, obj, hook)
 		local ov = mk("TextButton", {
 			BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 1,
@@ -820,7 +970,7 @@ local function createWindow(config)
 		function obj:Lock(k)
 			locked, key = true, k
 			ov.Visible = true
-			tag.Text = k ~= nil and "LOCKED • แตะเพื่อใส่ Key" or "LOCKED"
+			tag.Text = k ~= nil and "LOCKED • Tap to enter Key" or "LOCKED"
 			tw(ov, "bg", FX_TWEEN, {BackgroundTransparency = 0.35})
 			if hook then hook(true) end
 		end
@@ -835,19 +985,18 @@ local function createWindow(config)
 
 		ov.MouseButton1Click:Connect(function()
 			if key == nil then return end
-			prompt("ใส่ Key", "ใส่ key เพื่อปลดล็อก", "key...", function(txt)
+			prompt("Enter Key", "Enter the key to unlock", "key...", function(txt)
 				if matchKey(key, txt) then
 					obj:Unlock()
-					notify("ปลดล็อกแล้ว", nil, 2, "success")
+					notify("Unlocked", nil, 2, "success")
 				else
-					notify("Key ไม่ถูกต้อง", nil, 2, "error")
+					notify("Invalid key", nil, 2, "error")
 				end
 			end)
 		end)
 		return obj
 	end
 
-	-- opts.Lock = true / opts.LockKey = "key" ใช้ตอนสร้างได้เลย
 	local function finishObj(f, obj, opts, hook)
 		attachLock(f, obj, hook)
 		if type(opts) == "table" then
@@ -858,9 +1007,7 @@ local function createWindow(config)
 	end
 
 	-- ============================================================
-	--  build: ตัวสร้างคอมโพเนนต์ทั้งหมด (ใช้ซ้ำกับ page / Box / ScrollBox / Popup)
-	--  host = Frame ที่ใส่คอมโพเนนต์ (มี UIListLayout), scrolls = scroll ที่ต้องหยุดตอนลาก
-	--  anims = รายการ element ที่เล่น reveal (nil = ไม่เล่น), visFrame = เฟรมที่ซ่อนแล้วต้องปิด popup
+	--  build: component builder
 	-- ============================================================
 	local function build(host, scrolls, anims, visFrame)
 		local ui = {}
@@ -880,7 +1027,6 @@ local function createWindow(config)
 			return inner
 		end
 
-		-- ---------- Section / Label / Divider ----------
 		function ui:Section(text)
 			local f = entry(18, {BackgroundTransparency = 1})
 			local l = label(f, text, {Size = UDim2.fromScale(1, 1), FontFace = FONT_BOLD, TextSize = 14})
@@ -904,29 +1050,35 @@ local function createWindow(config)
 			return entry(1, {BackgroundTransparency = 0.85})
 		end
 
-		-- ---------- Image ----------
-		-- ui:Image(image, height, {Crop=false, Round=6, Color=Color3, Background=false})
+		-- ---------- Image (supports "lucide:name") ----------
 		function ui:Image(image, height, opts)
 			opts = opts or {}
 			local f = entry(height or 80, {BackgroundTransparency = opts.Background and ROW_BASE or 1})
 			local img = mk("ImageLabel", {
-				BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), Image = toImage(image),
+				BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1),
 				ScaleType = opts.Crop and Enum.ScaleType.Crop or Enum.ScaleType.Fit,
 				ImageColor3 = opts.Color or WHITE,
 			}, f)
+			setImg(img, image, height or 80)
 			if opts.Round then mk("UICorner", {CornerRadius = UDim.new(0, opts.Round)}, img) end
 			local obj = {}
-			function obj:Set(v) img.Image = toImage(v) end
+			function obj:Set(v) setImg(img, v, height or 80) end
 			return obj
 		end
 
-		-- ---------- Button ----------
-		-- opts = Color3 หรือ {Color=, Lock=, LockKey=}
+		-- ---------- Button (opts.Icon = "lucide:name") ----------
 		function ui:Button(text, cb, opts)
 			local color = typeof(opts) == "Color3" and opts or (type(opts) == "table" and opts.Color) or nil
 			local base = color and 0.7 or ROW_BASE
 			local f = entry(ROW_H, color and {BackgroundColor3 = color, BackgroundTransparency = base} or nil)
 			local l = label(f, text, {Size = UDim2.fromScale(1, 1), TextXAlignment = Enum.TextXAlignment.Center})
+			if type(opts) == "table" and opts.Icon then
+				local ic = mk("ImageLabel", {
+					BackgroundTransparency = 1, AnchorPoint = Vector2.new(0, 0.5),
+					Position = UDim2.new(0, PAD, 0.5, 0), Size = UDim2.fromOffset(14, 14),
+				}, f)
+				setImg(ic, opts.Icon, 14)
+			end
 			local hit = overlay(f)
 			addButtonFx(hit, function() return base end, 13, f, l)
 			hit.MouseButton1Click:Connect(function() call("Button " .. text, cb) end)
@@ -935,8 +1087,6 @@ local function createWindow(config)
 			return finishObj(f, obj, type(opts) == "table" and opts or nil)
 		end
 
-		-- ---------- Buttons: ปุ่ม 2-3 อันในแถวเดียว ----------
-		-- ui:Buttons({ {Text="A", Callback=fn, Color=Color3, Lock=true, LockKey="k"}, ... })
 		function ui:Buttons(list)
 			local f = entry(ROW_H, {BackgroundTransparency = 1})
 			mk("UIListLayout", {
@@ -960,16 +1110,16 @@ local function createWindow(config)
 			return objs
 		end
 
-		-- ---------- ImageButton ----------
-		-- ui:ImageButton(image, text|nil, cb, {Height=28, Lock=..})
+		-- ---------- ImageButton (supports "lucide:name") ----------
 		function ui:ImageButton(image, text, cb, opts)
 			local h = (type(opts) == "table" and opts.Height) or 28
 			local f = entry(h)
 			local img = mk("ImageLabel", {
-				BackgroundTransparency = 1, Image = toImage(image), Size = UDim2.fromOffset(h - 8, h - 8),
+				BackgroundTransparency = 1, Size = UDim2.fromOffset(h - 8, h - 8),
 				AnchorPoint = text and Vector2.new(0, 0.5) or Vector2.new(0.5, 0.5),
 				Position = text and UDim2.new(0, 6, 0.5, 0) or UDim2.fromScale(0.5, 0.5),
 			}, f)
+			setImg(img, image, h - 8)
 			local l
 			if text then
 				l = label(f, text, {Position = UDim2.new(0, h + 2, 0, 0), Size = UDim2.new(1, -(h + 8), 1, 0)})
@@ -978,12 +1128,10 @@ local function createWindow(config)
 			addButtonFx(hit, function() return ROW_BASE end, text and 13 or nil, f, l)
 			hit.MouseButton1Click:Connect(function() call("ImageButton", cb) end)
 			local obj = {}
-			function obj:SetImage(v) img.Image = toImage(v) end
+			function obj:SetImage(v) setImg(img, v, h - 8) end
 			return finishObj(f, obj, opts)
 		end
 
-		-- ---------- Box: กล่องใส่คอมโพเนนต์ได้ทุกอย่าง (คล้าย div) ----------
-		-- local b = ui:Box({Title="หัวข้อ", Height=nil(=ยืดตามเนื้อหา), Transparency=0.93})
 		function ui:Box(opts)
 			opts = opts or {}
 			local f = entry(opts.Height or 10, {
@@ -1001,7 +1149,6 @@ local function createWindow(config)
 			return sub
 		end
 
-		-- ---------- ScrollBox: กล่องสูงคงที่ มี scrollbar ของตัวเอง ----------
 		function ui:ScrollBox(height, opts)
 			opts = opts or {}
 			local f = entry(height or 100, {BackgroundTransparency = opts.Transparency or 0.93})
@@ -1023,13 +1170,10 @@ local function createWindow(config)
 			return sub
 		end
 
-		-- ---------- Popup ใน body (กล่องลอยกลางหน้า ใส่คอมโพเนนต์ได้) ----------
-		-- local p = ui:Popup({Title="..", Height=140, Width=nil}) ; p:Open() / p:Close()
 		function ui:Popup(opts)
 			return makeBodyPopup(opts)
 		end
 
-		-- ---------- Toggle (Switch) ----------
 		function ui:Toggle(text, default, cb, opts)
 			local f = entry(ROW_H)
 			label(f, text, {Position = UDim2.new(0, PAD, 0, 0), Size = UDim2.new(1, -50, 1, 0)})
@@ -1067,7 +1211,6 @@ local function createWindow(config)
 			return finishObj(f, obj, opts)
 		end
 
-		-- ---------- Slider ----------
 		function ui:Slider(text, min, max, default, cb, step, opts)
 			step = step or 1
 			local f = entry(34)
@@ -1118,7 +1261,6 @@ local function createWindow(config)
 			return finishObj(f, obj, opts)
 		end
 
-		-- ---------- Stepper (− ค่า +) ----------
 		function ui:Stepper(text, min, max, default, cb, step, opts)
 			step = step or 1
 			local f = entry(ROW_H)
@@ -1158,7 +1300,6 @@ local function createWindow(config)
 			return finishObj(f, obj, opts)
 		end
 
-		-- ---------- Progress (Scorebar) ----------
 		function ui:Progress(text, min, max, default)
 			local f = entry(30)
 			label(f, text, {Position = UDim2.new(0, PAD, 0, 2), Size = UDim2.new(0.6, 0, 0, 16)})
@@ -1193,7 +1334,6 @@ local function createWindow(config)
 			return obj
 		end
 
-		-- ---------- Textbox (ชื่ออยู่ซ้าย ช่องพิมพ์อยู่ขวา) ----------
 		function ui:Textbox(text, placeholder, cb, opts)
 			local f = entry(ROW_H)
 			label(f, text, {Position = UDim2.new(0, PAD, 0, 0), Size = UDim2.new(0.4, -PAD, 1, 0)})
@@ -1220,8 +1360,6 @@ local function createWindow(config)
 			end)
 		end
 
-		-- ---------- Input (ช่องพิมพ์เต็มความกว้าง, MultiLine ได้) ----------
-		-- ui:Input("ชื่อ", "placeholder", cb, {MultiLine=true, Height=64, Live=false})
 		function ui:Input(text, placeholder, cb, opts)
 			opts = opts or {}
 			local multi = opts.MultiLine == true
@@ -1259,7 +1397,6 @@ local function createWindow(config)
 			end)
 		end
 
-		-- ---------- Dropdown (List) ----------
 		function ui:Dropdown(text, options, default, cb, opts)
 			local f = entry(ROW_H, {BackgroundTransparency = 1})
 
@@ -1330,7 +1467,6 @@ local function createWindow(config)
 			end)
 		end
 
-		-- ---------- ColorPicker ----------
 		function ui:ColorPicker(text, default, cb, opts)
 			local PANEL_H = 96
 			local f = entry(ROW_H, {BackgroundTransparency = 1})
@@ -1419,8 +1555,6 @@ local function createWindow(config)
 			end)
 		end
 
-		-- ---------- Keybind ----------
-		-- allowClear = false: กด Esc แล้วไม่ล้างปุ่ม
 		function ui:Keybind(text, default, cb, allowClear, opts)
 			local f = entry(ROW_H)
 			label(f, text, {Position = UDim2.new(0, PAD, 0, 0), Size = UDim2.new(0.6, 0, 1, 0)})
@@ -1461,8 +1595,8 @@ local function createWindow(config)
 		return ui
 	end
 
-	-- ==================== สร้างหน้า (ภายใน) ====================
-	local function makePage(name, hasTab)
+	-- ==================== create page (internal) ====================
+	local function makePage(name, hasTab, icon)
 		local e = {name = name, active = false, anims = {}}
 
 		local pageFrame = mk("CanvasGroup", {
@@ -1480,13 +1614,22 @@ local function createWindow(config)
 				Size = UDim2.new(0, 50, 1, 0),
 			}, tabBar)
 			e.button = button
+			if icon then
+				local ic = mk("ImageLabel", {
+					BackgroundTransparency = 1, AnchorPoint = Vector2.new(0, 0.5),
+					Position = UDim2.new(0, 4, 0.5, 0), Size = UDim2.fromOffset(11, 11), ZIndex = 2,
+				}, button)
+				setImg(ic, icon, 11)
+				mk("UIPadding", {PaddingLeft = UDim.new(0, 12)}, button)
+				e.icon = ic
+			end
 			e.fx = addButtonFx(button, function()
 				return e.active and TAB_ACTIVE_TRANSPARENCY or TAB_INACTIVE_TRANSPARENCY
 			end, 12)
 			table.insert(tabList, e)
 			button.MouseButton1Click:Connect(function() selectEntry(e) end)
 		else
-			e.order = 1000 -- หน้า Settings อยู่ "ขวาสุด" เสมอ (ใช้คิดทิศทางสไลด์)
+			e.order = 1000
 		end
 
 		local scroll = mk("ScrollingFrame", {
@@ -1509,7 +1652,7 @@ local function createWindow(config)
 		return e
 	end
 
-	-- ==================== Popup ใน body ====================
+	-- ==================== Popup inside body ====================
 	makeBodyPopup = function(opts)
 		opts = opts or {}
 		local H = opts.Height or 140
@@ -1591,12 +1734,171 @@ local function createWindow(config)
 		return sub
 	end
 
+	-- ==================== PopupWindow: Windows-style draggable dialog ====================
+	-- Window:PopupWindow({Title, Icon, Text, Width, Height, Position=Vector2, Closable,
+	--                     Buttons={ {Text, Callback, Primary, Color, Keep} }})
+	local pwZ, pwCount = 2, 0
+
+	makePopupWindow = function(opts)
+		opts = opts or {}
+		pwCount += 1
+		local W, H = opts.Width or 240, opts.Height or 170
+		local hasBtns = opts.Buttons and #opts.Buttons > 0
+
+		local card = mk("CanvasGroup", {
+			Size = UDim2.fromOffset(W, H), BackgroundColor3 = Color3.fromRGB(36, 36, 36),
+			GroupTransparency = 1, Visible = false, ZIndex = 2, Active = true,
+		}, topLayer)
+		mk("UIStroke", {Color = WHITE, Thickness = 1, Transparency = 0.8}, card)
+
+		local bar = mk("Frame", {BackgroundColor3 = Color3.fromRGB(52, 52, 52), Size = UDim2.new(1, 0, 0, 22), Active = true}, card)
+		local x0 = PAD
+		if opts.Icon then
+			local ic = mk("ImageLabel", {
+				BackgroundTransparency = 1, AnchorPoint = Vector2.new(0, 0.5),
+				Position = UDim2.new(0, 6, 0.5, 0), Size = UDim2.fromOffset(14, 14),
+			}, bar)
+			setImg(ic, opts.Icon, 14)
+			x0 = 24
+		end
+		local ttl = label(bar, opts.Title or "", {
+			Position = UDim2.new(0, x0, 0, 0), Size = UDim2.new(1, -(x0 + 26), 1, 0),
+			FontFace = FONT_BOLD, TextSize = 13,
+		})
+		local closeB = mk("TextButton", {
+			Text = "X", TextSize = 12, AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -3, 0.5, 0),
+			Size = UDim2.fromOffset(18, 16), BackgroundColor3 = RED, BackgroundTransparency = 0.6,
+		}, bar)
+		addButtonFx(closeB, function() return 0.6 end, 12)
+
+		local footH = hasBtns and 30 or 0
+		local sc = mk("ScrollingFrame", {
+			BackgroundTransparency = 1, Position = UDim2.new(0, 0, 0, 22),
+			Size = UDim2.new(1, 0, 1, -(22 + footH)),
+			CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y,
+			ScrollingDirection = Enum.ScrollingDirection.Y, ScrollBarThickness = 3,
+			ScrollBarImageColor3 = WHITE, ScrollBarImageTransparency = 0.6,
+		}, card)
+		mk("UIListLayout", {Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder}, sc)
+		mk("UIPadding", {
+			PaddingTop = UDim.new(0, PAD), PaddingBottom = UDim.new(0, PAD),
+			PaddingLeft = UDim.new(0, PAD), PaddingRight = UDim.new(0, PAD + 2),
+		}, sc)
+
+		local sub = build(sc, {sc}, nil, card)
+		if opts.Text and opts.Text ~= "" then sub:Label(opts.Text) end
+
+		local isOpen, placed = false, false
+
+		function sub:Open()
+			if isOpen then return end
+			isOpen = true
+			closeAllPopups()
+			if not placed then
+				placed = true
+				local s = topLayer.AbsoluteSize
+				local x, y
+				if opts.Position then
+					x, y = opts.Position.X, opts.Position.Y
+				else
+					local c = ((pwCount - 1) % 5) * 18
+					x, y = (s.X - W) / 2 + c, (s.Y - H) / 2 + c
+				end
+				card.Position = UDim2.fromOffset(math.clamp(x, 0, math.max(s.X - W, 0)), math.clamp(y, 0, math.max(s.Y - H, 0)))
+			end
+			pwZ = math.min(pwZ + 1, 45)
+			card.ZIndex = pwZ
+			card.Visible = true
+			tw(card, "fade", OPEN_TWEEN, {GroupTransparency = 0})
+		end
+		function sub:Close(instant)
+			if not isOpen then return end
+			isOpen = false
+			if instant then
+				card.Visible = false
+				card.GroupTransparency = 1
+				return
+			end
+			local t = tw(card, "fade", FX_TWEEN, {GroupTransparency = 1})
+			t.Completed:Connect(function(state)
+				if state == Enum.PlaybackState.Completed and not isOpen then card.Visible = false end
+			end)
+		end
+		function sub:Toggle()
+			if isOpen then sub:Close() else sub:Open() end
+		end
+		function sub:IsOpen() return isOpen end
+		function sub:SetTitle(t) ttl.Text = t end
+
+		-- window footer buttons
+		if hasBtns then
+			local row = mk("Frame", {
+				BackgroundTransparency = 1, Position = UDim2.new(0, 6, 1, -28), Size = UDim2.new(1, -12, 0, 24),
+			}, card)
+			mk("UIListLayout", {
+				FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6),
+				SortOrder = Enum.SortOrder.LayoutOrder, HorizontalFlex = Enum.UIFlexAlignment.Fill,
+			}, row)
+			for i, b in ipairs(opts.Buttons) do
+				local base = b.Primary and 0.2 or ROW_BASE
+				local btn = mk("TextButton", {
+					LayoutOrder = i, Text = b.Text or "OK", TextSize = 12,
+					BackgroundColor3 = b.Primary and (b.Color or accent) or (b.Color or WHITE),
+					BackgroundTransparency = base, Size = UDim2.new(0, 50, 1, 0),
+				}, row)
+				addButtonFx(btn, function() return base end, 12)
+				btn.MouseButton1Click:Connect(function()
+					call("PopupWindow " .. tostring(b.Text), b.Callback)
+					if not b.Keep then sub:Close() end
+				end)
+			end
+		end
+
+		-- drag window from title bar + click to bring it to front
+		local dragging, dStart, dOrigin = false, Vector3.zero, UDim2.new()
+		bar.InputBegan:Connect(function(input)
+			if isPtr(input) then
+				dragging, dStart, dOrigin = true, input.Position, card.Position
+				pwZ = math.min(pwZ + 1, 45)
+				card.ZIndex = pwZ
+			end
+		end)
+		card.InputBegan:Connect(function(input)
+			if isPtr(input) and not dragging then
+				pwZ = math.min(pwZ + 1, 45)
+				card.ZIndex = pwZ
+			end
+		end)
+		table.insert(connections, UserInputService.InputChanged:Connect(function(input)
+			if not dragging then return end
+			if input.UserInputType ~= Enum.UserInputType.MouseMovement
+				and input.UserInputType ~= Enum.UserInputType.Touch then
+				return
+			end
+			local d = input.Position - dStart
+			local s = topLayer.AbsoluteSize
+			card.Position = UDim2.fromOffset(
+				math.clamp(dOrigin.X.Offset + d.X, 0, math.max(s.X - W, 0)),
+				math.clamp(dOrigin.Y.Offset + d.Y, 0, math.max(s.Y - H, 0))
+			)
+		end))
+		table.insert(connections, UserInputService.InputEnded:Connect(function(input)
+			if isPtr(input) then dragging = false end
+		end))
+
+		closeB.MouseButton1Click:Connect(function() sub:Close() end)
+		if opts.Closable == false then closeB.Visible = false end
+
+		table.insert(popupWins, sub)
+		return sub
+	end
+
 	-- ==================== Notify ====================
 	local MAX_TOASTS = 4
 
 	local toastHolder = mk("Frame", {
 		AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -10, 0, 10),
-		Size = UDim2.new(0, 210, 1, -20), BackgroundTransparency = 1, ZIndex = 3,
+		Size = UDim2.new(0, 210, 1, -20), BackgroundTransparency = 1, ZIndex = 60,
 	}, topLayer)
 	mk("UIListLayout", {
 		Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder,
@@ -1606,9 +1908,6 @@ local function createWindow(config)
 	local toastOrder = 0
 	local aliveToasts = {}
 
-	-- notify("หัวข้อ", "ข้อความ", วินาที, "info|success|warn|error")
-	-- หรือ notify({Title=, Text=, Duration= (0 = ไม่หายเอง), Color=Color3, Kind=,
-	--             Buttons={ {Text=, Callback=, Color=, Keep=false} }})
 	notify = function(a, b, c, d)
 		local o
 		if type(a) == "table" then
@@ -1692,7 +1991,6 @@ local function createWindow(config)
 				end)
 			end
 		else
-			-- ไม่มีปุ่ม: กดที่ toast เพื่อปิด
 			t.InputBegan:Connect(function(input)
 				if isPtr(input) then obj.Dismiss() end
 			end)
@@ -1725,7 +2023,7 @@ local function createWindow(config)
 
 		local dim = mk("TextButton", {
 			BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 1,
-			Size = UDim2.fromScale(1, 1), ZIndex = 2,
+			Size = UDim2.fromScale(1, 1), ZIndex = 70,
 		}, topLayer)
 
 		local card = mk("CanvasGroup", {
@@ -1823,8 +2121,8 @@ local function createWindow(config)
 		return dialog({
 			title = titleText, text = text,
 			buttons = {
-				{text = "ยกเลิก", callback = onNo},
-				{text = "ยืนยัน", primary = true, callback = onYes},
+				{text = "Cancel", callback = onNo},
+				{text = "Confirm", primary = true, callback = onYes},
 			},
 		})
 	end
@@ -1833,13 +2131,13 @@ local function createWindow(config)
 		return dialog({
 			title = titleText, text = text, input = placeholder or "",
 			buttons = {
-				{text = "ยกเลิก"},
-				{text = "ตกลง", primary = true, callback = onSubmit},
+				{text = "Cancel"},
+				{text = "OK", primary = true, callback = onSubmit},
 			},
 		})
 	end
 
-	-- ==================== หด/ขยาย ====================
+	-- ==================== collapse/expand ====================
 	local SIZE_TWEEN_OUT = TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
 	local FADE_TWEEN_OUT = TweenInfo.new(0.18, QUAD_OUT, Enum.EasingDirection.Out)
 	local FADE_TWEEN_IN  = TweenInfo.new(0.30, QUAD_OUT, Enum.EasingDirection.Out, 0, false, 0.08)
@@ -1887,15 +2185,32 @@ local function createWindow(config)
 
 	collapse.MouseButton1Click:Connect(function() setCollapsed(not collapsed) end)
 
-	-- ==================== Window mode + ชิดขอบ + ปรับขนาด ====================
+	-- ==================== Window mode + edge snapping (cake stacking) + resizing ====================
 	local MODE_TWEEN = TweenInfo.new(0.5, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
 	local SNAP_TWEEN = TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
 
-	-- ฉากมืดตอนชิดขอบ (กดเพื่อกลับ)
+	-- dark overlay when edge-snapped (click to return) + window name label in the visible portion
 	local snapDim = mk("TextButton", {
 		Name = "snapDim", BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 1,
 		Size = UDim2.fromScale(1, 1), ZIndex = 60, Visible = false,
 	}, main)
+	local snapLabel = mk("TextLabel", {
+		Text = NAME, TextSize = 10, BackgroundTransparency = 1, ZIndex = 61,
+		TextTruncate = Enum.TextTruncate.AtEnd, TextXAlignment = Enum.TextXAlignment.Center,
+		Size = UDim2.new(0.3, 0, 0, 13),
+	}, snapDim)
+
+	local function layoutSnapLabel(edge)
+		if edge == "left" then
+			snapLabel.AnchorPoint, snapLabel.Position, snapLabel.Size = Vector2.new(1, 0), UDim2.fromScale(1, 0), UDim2.new(0.3, 0, 0, 13)
+		elseif edge == "right" then
+			snapLabel.AnchorPoint, snapLabel.Position, snapLabel.Size = Vector2.new(0, 0), UDim2.fromScale(0, 0), UDim2.new(0.3, 0, 0, 13)
+		elseif edge == "top" then
+			snapLabel.AnchorPoint, snapLabel.Position, snapLabel.Size = Vector2.new(0, 1), UDim2.fromScale(0, 1), UDim2.new(1, 0, 0, 13)
+		else
+			snapLabel.AnchorPoint, snapLabel.Position, snapLabel.Size = Vector2.new(0, 0), UDim2.fromScale(0, 0), UDim2.new(1, 0, 0, 13)
+		end
+	end
 
 	local function unsnap()
 		if not snapped then return end
@@ -1906,14 +2221,34 @@ local function createWindow(config)
 		elseif snapEdge == "top" then winY = MARGIN
 		elseif snapEdge == "bottom" then winY = s.Y - winH - MARGIN end
 		snapEdge = nil
+		-- leave the cake stack and restore the previous minimized state
+		if inPile then
+			pileLeave(ctrl)
+			inPile = false
+			if stackedCollapse then
+				stackedCollapse = false
+				setCollapsed(false)
+			end
+		end
 		tw(snapScale, "s", SNAP_TWEEN, {Value = 1})
 		local t = tw(snapDim, "bg", FX_TWEEN, {BackgroundTransparency = 1})
 		t.Completed:Connect(function() if not snapped then snapDim.Visible = false end end)
 	end
 
 	local function snapTo(edge)
-		snapped, snapEdge = true, edge
 		closeAllPopups()
+		if stackEnabled then
+			-- join this edge's cake stack (includes all 2.1+ family windows, up to Hub.MAX_STACK layers)
+			if not pileJoin(ctrl, edge, Vector2.new(winX, winY)) then
+				notify("Stack full", "This edge stack is full (maximum " .. Hub.MAX_STACK .. "  layers)", 2.5, "warn")
+				return
+			end
+			inPile = true
+			stackedCollapse = not collapsed
+			if stackedCollapse then setCollapsed(true) end -- collapse to the title bar as a thin layer
+		end
+		snapped, snapEdge = true, edge
+		layoutSnapLabel(edge)
 		tw(snapScale, "s", SNAP_TWEEN, {Value = SNAP_SCALE})
 		snapDim.Visible = true
 		tw(snapDim, "bg", SNAP_TWEEN, {BackgroundTransparency = 0.5})
@@ -1942,7 +2277,6 @@ local function createWindow(config)
 		setMode(mode == "dock" and "window" or "dock")
 	end)
 
-	-- มุมสำหรับปรับขนาด (เฉพาะ window mode)
 	local corners = {
 		{ax = 0, ay = 0, sx = -1, sy = -1, size = 14},
 		{ax = 1, ay = 0, sx = 1,  sy = -1, size = 7},
@@ -1966,7 +2300,6 @@ local function createWindow(config)
 		end)
 	end
 
-	-- ---------- ลากหน้าต่างจาก Title ----------
 	local dragging = false
 	local dragStart = Vector3.zero
 	local sDockX, sWinX, sWinY = 0, 0, 0
@@ -2019,7 +2352,6 @@ local function createWindow(config)
 		resizing = nil
 		if dragging then
 			dragging = false
-			-- ปล่อยที่ขอบจอใน window mode = หด + มืด + เหลือติ่งโผล่
 			if mode == "window" and not snapped and blend.Value > 0.9 then
 				local s = screenGui.AbsoluteSize
 				if winX <= EDGE then snapTo("left")
@@ -2030,7 +2362,7 @@ local function createWindow(config)
 		end
 	end))
 
-	-- ---------- ลูปหลัก: คำนวณขนาด/ตำแหน่งทุกเฟรม ----------
+	-- ---------- main loop ----------
 	local lastBody
 	local function approach(cur, tgt, dt)
 		if math.abs(tgt - cur) < 0.05 then return tgt end
@@ -2048,27 +2380,40 @@ local function createWindow(config)
 		local Hw = TITLE_HEIGHT + winBody * ca
 		local H = lerp(Hd, Hw, b)
 
-		-- dock: ลากแกน X ชิดมุมล่างขวา
 		dockTX = math.clamp(dockTX, math.min(-(s.X - WIDTH), -RIGHT), -RIGHT)
 		dockCX = approach(dockCX, dockTX, dt)
 
-		-- window: ตำแหน่งเป้าหมาย (ปกติ หรือโผล่ติ่งตอนชิดขอบ)
 		local tx, ty
 		if snapped then
-			local sw, sh = winW * SNAP_SCALE, Hw * SNAP_SCALE
-			tx, ty = winX, winY
-			if snapEdge == "left" then
-				tx = -sw * (1 - SNAP_PEEK)
-				ty = math.clamp(winY, 0, math.max(s.Y - sh, 0))
-			elseif snapEdge == "right" then
-				tx = s.X - sw * SNAP_PEEK
-				ty = math.clamp(winY, 0, math.max(s.Y - sh, 0))
+			local lh = TITLE_HEIGHT * SNAP_SCALE
+			local sw = winW * SNAP_SCALE
+			local sh = inPile and lh or Hw * SNAP_SCALE
+			local idx, n, ax, ay = 1, 1, winX, winY
+			local pile = Hub.piles[snapEdge]
+			if inPile and pile then
+				idx = table.find(pile.list, ctrl) or 1
+				n = #pile.list
+				if pile.anchor then ax, ay = pile.anchor.X, pile.anchor.Y end
+			end
+			local step = lh + 3
+			local peekY = inPile and math.max(lh * SNAP_PEEK, 12) or sh * SNAP_PEEK
+
+			if snapEdge == "left" or snapEdge == "right" then
+				tx = (snapEdge == "left") and (-sw * (1 - SNAP_PEEK)) or (s.X - sw * SNAP_PEEK)
+				if inPile then
+					-- cake layers stack upward from the stack origin
+					local lo = (n - 1) * step
+					local base = math.clamp(ay, lo, math.max(s.Y - lh, lo))
+					ty = base - (idx - 1) * step
+				else
+					ty = math.clamp(winY, 0, math.max(s.Y - sh, 0))
+				end
 			elseif snapEdge == "top" then
-				ty = -sh * (1 - SNAP_PEEK)
-				tx = math.clamp(winX, 0, math.max(s.X - sw, 0))
+				tx = math.clamp(inPile and ax or winX, 0, math.max(s.X - sw, 0))
+				ty = -sh + peekY + (idx - 1) * step -- stack hangs down from the top edge
 			else
-				ty = s.Y - sh * SNAP_PEEK
-				tx = math.clamp(winX, 0, math.max(s.X - sw, 0))
+				tx = math.clamp(inPile and ax or winX, 0, math.max(s.X - sw, 0))
+				ty = s.Y - peekY - (idx - 1) * step -- stack rises upward from the bottom edge
 			end
 		else
 			winX = math.clamp(winX, 0, math.max(s.X - winW, 0))
@@ -2096,7 +2441,7 @@ local function createWindow(config)
 		end
 	end))
 
-	-- ==================== ซ่อน/แสดง (Hotkey) และ Kill ====================
+	-- ==================== hide/show (Hotkey) and Kill ====================
 	local shown, closing = true, false
 	local HIDE_TWEEN = TweenInfo.new(0.25, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
 	local OUTRO = TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
@@ -2112,6 +2457,7 @@ local function createWindow(config)
 			if currentDialog then currentDialog.close(true) end
 			closeAllPopups()
 			closeBodyPopups()
+			for _, p in ipairs(popupWins) do p:Close(true) end
 			local t = tw(main, "vis", HIDE_TWEEN, {GroupTransparency = 1})
 			tw(slideY, "slide", HIDE_TWEEN, {Value = 40})
 			t.Completed:Connect(function(state)
@@ -2140,7 +2486,7 @@ local function createWindow(config)
 		end)
 	end
 
-	-- ==================== หน้า Settings หลัก (ภายใน library เท่านั้น) ====================
+	-- ==================== main Settings page (inside the library only) ====================
 	settingsEntry = makePage("__settings", false)
 	settingFx = addButtonFx(setting, function()
 		return currentTab == settingsEntry and 0.6 or 0.9
@@ -2159,9 +2505,10 @@ local function createWindow(config)
 		s:Section("Settings")
 		s:Keybind("Hide / Show UI", hotkey, function() setShown(not shown) end, false)
 		s:ColorPicker("Main Color", accent, function(c) setAccent(c) end)
+		s:Toggle("Stack on edge (max " .. Hub.MAX_STACK .. ")", stackEnabled, function(v) stackEnabled = v end)
 		s:Divider()
 		s:Button("Kill UI", function()
-			confirm("Kill UI?", "ปิดและลบ UI นี้ทิ้งทั้งหมด", kill)
+			confirm("Kill UI?", "close and remove this entire UI", kill)
 		end, RED)
 		s:Label(NAME .. " • Tomato UI Library v" .. Library.Version)
 	end
@@ -2186,23 +2533,65 @@ local function createWindow(config)
 		if not closing then setCollapsed(false) end
 	end)
 
-	-- ==================== Window API (สิ่งเดียวที่สคริปต์ภายนอกเข้าถึงได้) ====================
+	-- tell other family windows that a new window exists
+	task.defer(hubDeliver, NAME, nil, "WindowAdded", NAME)
+
+	-- ==================== Window API ====================
 	local Window = {}
 
-	function Window:AddPage(name)
-		return makePage(tostring(name), true).ui
+	function Window:AddPage(name, icon)
+		return makePage(tostring(name), true, icon).ui
 	end
 	function Window:Notify(a, b, c, d) return notify(a, b, c, d) end
 	function Window:Dialog(opts) return dialog(opts) end
 	function Window:Confirm(t, text, onYes, onNo) return confirm(t, text, onYes, onNo) end
 	function Window:Prompt(t, text, ph, onSubmit) return prompt(t, text, ph, onSubmit) end
 	function Window:Popup(opts) return makeBodyPopup(opts) end
+	function Window:PopupWindow(opts) return makePopupWindow(opts) end
 	function Window:Log(msg) logError("Log", msg) end
+
+	-- ---------- cross-window communication (2.1+ family windows only) ----------
+	-- receive messages: Window:On("topic", function(from, ...) end)  disconnect: conn:Disconnect()
+	function Window:On(topic, fn)
+		ctrl.handlers[topic] = ctrl.handlers[topic] or {}
+		table.insert(ctrl.handlers[topic], fn)
+		return {Disconnect = function()
+			local t = ctrl.handlers[topic]
+			local i = t and table.find(t, fn)
+			if i then table.remove(t, i) end
+		end}
+	end
+	function Window:Send(target, topic, ...) hubDeliver(NAME, target, topic, ...) end
+	function Window:Broadcast(topic, ...) hubDeliver(NAME, nil, topic, ...) end
+	-- expose a function for other windows to call: Window:Expose("name", function(from, ...) return ... end)
+	function Window:Expose(name, fn) ctrl.exposed[name] = fn end
+	-- call another window function: local ok, result = Window:Invoke("window name", "name", ...)
+	function Window:Invoke(target, name, ...) return hubInvoke(NAME, target, name, ...) end
+	function Window:List()
+		local t = {}
+		for name in pairs(Hub.windows) do
+			if name ~= NAME then table.insert(t, name) end
+		end
+		table.sort(t)
+		return t
+	end
+	-- values shared by all windows
+	function Window:SetShared(key, value) hubSetShared(NAME, key, value) end
+	function Window:GetShared(key) return Hub.shared[key] end
+	function Window:OnShared(key, fn)
+		ctrl.sharedHandlers[key] = ctrl.sharedHandlers[key] or {}
+		table.insert(ctrl.sharedHandlers[key], fn)
+		return {Disconnect = function()
+			local t = ctrl.sharedHandlers[key]
+			local i = t and table.find(t, fn)
+			if i then table.remove(t, i) end
+		end}
+	end
 
 	return Window
 end
 
--- object ว่างที่เรียกเมธอดไหนก็ไม่ error (ใช้ตอน CreateWindow ล้มเหลว เพื่อให้สคริปต์ที่เหลือไม่พังตาม)
+-- empty object that safely ignores any method call (used when CreateWindow fails)
 local function dummy()
 	local d = {}
 	return setmetatable(d, {__index = function() return function() return d end end})
