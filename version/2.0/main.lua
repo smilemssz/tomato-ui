@@ -9,7 +9,7 @@ local ScriptContext = game:GetService("ScriptContext")
 
 local Library = {Logs = {}, Version = "2.0"}
 
--- ==================== ค่าคงที่ / ตัวช่วยกลาง ====================
+-- ==================== Constants / shared helpers ====================
 
 local QUAD_OUT   = Enum.EasingStyle.Quad
 local FX_TWEEN   = TweenInfo.new(0.15, QUAD_OUT, Enum.EasingDirection.Out)
@@ -27,7 +27,7 @@ local ROW_H, PAD, ROW_BASE = 24, 6, 0.9
 
 local running = setmetatable({}, {__mode = "k"})
 
--- tween แยกตาม "ช่อง" ต่อ instance สั่งซ้ำช่องเดิมจะยกเลิกอันเก่าให้
+-- separate tweens by "channel" per instance; repeating the same channel cancels the previous tween
 local function tw(inst, channel, info, goal)
 	running[inst] = running[inst] or {}
 	local old = running[inst][channel]
@@ -38,7 +38,7 @@ local function tw(inst, channel, info, goal)
 	return t
 end
 
--- hover / กด: จางเข้มขึ้น + ตัวอักษรหดนิดๆ
+-- hover / press: darken slightly + shrink the text a little
 local function addButtonFx(btn, getBase, textSize, bgTarget, textTarget)
 	bgTarget = bgTarget or btn
 	textTarget = textTarget or (btn:IsA("TextButton") and btn or nil)
@@ -91,7 +91,7 @@ end
 local function round4(v) return math.round(v * 10000) / 10000 end
 local function lerp(a, b, t) return a + (b - a) * t end
 
--- รับ id ตัวเลข / "123" / "rbxassetid://123" / url
+-- accepts numeric IDs / "123" / "rbxassetid://123" / URL
 local function toImage(v)
 	if type(v) == "number" then return "rbxassetid://" .. v end
 	v = tostring(v or "")
@@ -131,7 +131,7 @@ local function overlay(parent)
 	return mk("TextButton", {BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 10}, parent)
 end
 
--- เทียบ key: string / table ของ string / function(key) -> bool
+-- compare key: string / table of strings / function(key) -> bool
 local function matchKey(spec, input)
 	input = tostring(input or "")
 	if type(spec) == "function" then
@@ -150,7 +150,7 @@ local function getClipboard()
 	return setclipboard or toclipboard
 end
 
--- ==================== Error Log (popup ดู/คัดลอกได้) ====================
+-- ==================== Error Log (view/copy popup) ====================
 
 local logGui, logBox, logTitle
 
@@ -200,7 +200,7 @@ local function showLog()
 			PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4),
 			PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 4),
 		}, sc)
-		-- TextBox แบบอ่านอย่างเดียว เลือกข้อความคัดลอกเองได้
+		-- Read-only TextBox; text can be selected and copied manually
 		logBox = mk("TextBox", {
 			Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
 			BackgroundTransparency = 1, TextWrapped = true, TextEditable = false,
@@ -231,9 +231,9 @@ local function showLog()
 		copyB.MouseButton1Click:Connect(function()
 			local f = getClipboard()
 			if f and pcall(f, table.concat(Library.Logs, "\n\n")) then
-				copyB.Text = "คัดลอกแล้ว"
+				copyB.Text = "Copied"
 			else
-				copyB.Text = "เลือกข้อความเอง"
+				copyB.Text = "Select text manually"
 			end
 			task.delay(1.4, function() copyB.Text = "Copy" end)
 		end)
@@ -263,7 +263,7 @@ local function errHandler(e)
 	return tostring(e) .. "\n" .. debug.traceback("", 2)
 end
 
--- เรียก callback แบบกัน error: ถ้าพังจะขึ้น Error Log แทนที่จะทำให้สคริปต์หยุด
+-- call callbacks with error protection: failures appear in the Error Log instead of stopping the script
 local function call(tag, fn, ...)
 	if type(fn) ~= "function" then return end
 	local ok, err = xpcall(fn, errHandler, ...)
@@ -273,7 +273,7 @@ end
 Library.LogError = logError
 Library.ShowLog = showLog
 
--- รันฟังก์ชันของคุณแบบกัน error: Library:Protect(function() ... end)
+-- run your function with error protection: Library:Protect(function() ... end)
 function Library:Protect(fn, ...)
 	local ok, err = xpcall(fn, errHandler, ...)
 	if not ok then logError("Script", err) end
@@ -283,13 +283,13 @@ end
 -- ============================================================
 --  Library:KeySystem
 --  cfg = {
---      Name = "ชื่อ", Description = "คำอธิบาย", Accent = Color3,
---      Url = "ลิงก์รับ key", GetKeyText = "getkey", CheckText = "Check Key",
+--      Name = "Name", Description = "Description", Accent = Color3,
+--      Url = "key retrieval link", GetKeyText = "getkey", CheckText = "Check Key",
 --      Key = "abc" | Keys = {"a","b"} | Validate = function(key) return bool end,
---      SaveFile = "tomato_key.txt" (ไม่ใส่ = ไม่บันทึก),
+--      SaveFile = "tomato_key.txt" (omit = do not save),
 --      OnSuccess = function(key) end, OnClose = function() end,
 --  }
---  คืนค่า true เมื่อ key ถูก, false เมื่อผู้ใช้ปิดหน้าต่าง (รอจนกว่าจะเสร็จ)
+--  Returns true when the key is valid, false when the user closes the window (waits until finished)
 -- ============================================================
 function Library:KeySystem(cfg)
 	cfg = cfg or {}
@@ -304,7 +304,7 @@ function Library:KeySystem(cfg)
 		return matchKey(cfg.Keys or cfg.Key, k)
 	end
 
-	-- key ที่เคยบันทึกไว้
+	-- previously saved key
 	if cfg.SaveFile then
 		local ok, saved = pcall(function()
 			if isfile and readfile and isfile(cfg.SaveFile) then return readfile(cfg.SaveFile) end
@@ -370,7 +370,7 @@ function Library:KeySystem(cfg)
 		local input = mk("TextBox", {
 			LayoutOrder = 4, Size = UDim2.new(1, 0, 0, 24), TextSize = 13,
 			BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.6,
-			PlaceholderText = "ใส่ Key ที่นี่...", PlaceholderColor3 = GRAY,
+			PlaceholderText = "Enter Key here...", PlaceholderColor3 = GRAY,
 			ClearTextOnFocus = false, TextXAlignment = Enum.TextXAlignment.Left, ClipsDescendants = true,
 		}, card)
 		mk("UIPadding", {PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6)}, input)
@@ -421,9 +421,9 @@ function Library:KeySystem(cfg)
 			if not cfg.Url then return end
 			local f = getClipboard()
 			if f and pcall(f, cfg.Url) then
-				setStatus("คัดลอกลิงก์แล้ว นำไปเปิดในเบราว์เซอร์", GREEN)
+				setStatus("Link copied. Open it in your browser", GREEN)
 			else
-				setStatus("คัดลอกลิงก์จากช่องด้านบนเอง", GRAY)
+				setStatus("Copy the link from the field above manually", GRAY)
 			end
 		end)
 
@@ -431,18 +431,18 @@ function Library:KeySystem(cfg)
 		local function doCheck()
 			if busy or result ~= nil then return end
 			busy = true
-			setStatus("กำลังตรวจสอบ...", GRAY)
+			setStatus("Checking...", GRAY)
 			task.spawn(function()
 				local key = input.Text
 				local good = check(key)
 				busy = false
 				if good then
-					setStatus("สำเร็จ", GREEN)
+					setStatus("Success", GREEN)
 					if cfg.SaveFile and writefile then pcall(writefile, cfg.SaveFile, key) end
 					finish(true)
 					call("KeySystem.OnSuccess", cfg.OnSuccess, key)
 				else
-					setStatus(cfg.WrongText or "Key ไม่ถูกต้อง", RED)
+					setStatus(cfg.WrongText or "Invalid key", RED)
 					shake()
 				end
 			end)
@@ -471,10 +471,10 @@ end
 -- ============================================================
 --  Library:CreateWindow
 --  config = {
---      Name = "ชื่อ UI", Accent = Color3, Hotkey = Enum.KeyCode,
+--      Name = "UI name", Accent = Color3, Hotkey = Enum.KeyCode,
 --      OnKill = function() end,
---      NotifyDuration = 3,          -- ค่าเริ่มต้นของการแจ้งเตือน (วินาที)
---      CatchAllErrors = false,      -- true = ดัก error ทุกอย่างจาก ScriptContext เข้า Error Log
+--      NotifyDuration = 3,          -- default notification duration (seconds)
+--      CatchAllErrors = false,      -- true = catch all ScriptContext errors and send them to the Error Log
 --  }
 -- ============================================================
 local function createWindow(config)
@@ -508,10 +508,10 @@ local function createWindow(config)
 		end))
 	end
 
-	-- เลเยอร์บนสุดของจอ: popup ของ Dropdown/ColorPicker, dialog, toast
+	-- Topmost screen layer: Dropdown/ColorPicker popups, dialogs, and toasts
 	local topLayer = mk("Frame", {Name = "topLayer", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 100}, screenGui)
 
-	-- ---------- ระบบสีหลัก ----------
+	-- ---------- Accent color system ----------
 	local accentFns = {}
 	local function bindAccent(fn)
 		table.insert(accentFns, fn)
@@ -522,14 +522,14 @@ local function createWindow(config)
 		for _, fn in ipairs(accentFns) do fn(c) end
 	end
 
-	-- ==================== ขนาด / สถานะ ====================
+	-- ==================== Size / state ====================
 	local RIGHT, BOTTOM, WIDTH = 0, 0, 211
 	local TITLE_HEIGHT, TAB_HEIGHT, PAGES_HEIGHT = 19, 17, 219
 	local DOCK_BODY = TAB_HEIGHT + PAGES_HEIGHT
 	local MIN_W, MIN_H = 170, TITLE_HEIGHT + TAB_HEIGHT + 90
 
-	local SNAP_SCALE = 0.75 -- ขนาดตอนชิดขอบ (0.75 = หด 25%)
-	local SNAP_PEEK  = 0.25 -- ส่วนที่โผล่พ้นขอบจอ (0.25 = โผล่ 25%)
+	local SNAP_SCALE = 0.75 -- size when snapped to the edge (0.75 = shrunk by 25%)
+	local SNAP_PEEK  = 0.25 -- portion visible beyond the screen edge (0.25 = 25% visible)
 	local EDGE, MARGIN = 6, 12
 	local SMOOTHNESS = 8
 	local ICON_DOCK, ICON_WINDOW = "□", "▭"
@@ -545,11 +545,11 @@ local function createWindow(config)
 	local mode = "dock"
 	local dockTX, dockCX = -RIGHT, -RIGHT
 	local winInit = false
-	local winX, winY, winW, winH = 0, 0, 260, 300 -- ตำแหน่ง/ขนาดล่าสุดของ window mode
+	local winX, winY, winW, winH = 0, 0, 260, 300 -- last position/size of window mode
 	local winCX, winCY = 0, 0
 	local snapped, snapEdge = false, nil
 
-	-- ==================== โครงหน้าต่าง ====================
+	-- ==================== Window structure ====================
 	local main = mk("CanvasGroup", {
 		Name = "main", AnchorPoint = Vector2.new(0, 0),
 		Size = UDim2.fromOffset(WIDTH, TITLE_HEIGHT),
@@ -615,7 +615,7 @@ local function createWindow(config)
 		ClipsDescendants = true, Size = UDim2.new(1, 0, 0, PAGES_HEIGHT),
 	}, body)
 
-	-- ==================== ระบบ Page ====================
+	-- ==================== Page system ====================
 	local TAB_ACTIVE_TRANSPARENCY, TAB_INACTIVE_TRANSPARENCY = 0.1, 0.9
 	local TAB_TWEEN = TweenInfo.new(0.2, QUAD_OUT, Enum.EasingDirection.Out)
 	local INSTANT = TweenInfo.new(0)
@@ -629,7 +629,7 @@ local function createWindow(config)
 	local settingsEntry, settingFx
 	local tabCount = 0
 
-	-- forward declaration (ประกาศไว้ก่อน ใช้ข้ามส่วนได้)
+	-- forward declaration (declared in advance for use across sections)
 	local notify, dialog, confirm, prompt, makeBodyPopup
 	local popups, bodyPopups = {}, {}
 
@@ -704,13 +704,13 @@ local function createWindow(config)
 		playReveal(nextT)
 	end
 
-	-- ==================== ตัวช่วยสำหรับคอมโพเนนต์ ====================
+	-- ==================== Component helpers ====================
 	local function inside(gui, p)
 		local a, s = gui.AbsolutePosition, gui.AbsoluteSize
 		return p.X >= a.X and p.X <= a.X + s.X and p.Y >= a.Y and p.Y <= a.Y + s.Y
 	end
 
-	-- ลาก (เมาส์/นิ้ว) ปิดการเลื่อนของ scroll ทุกตัวที่ครอบอยู่ระหว่างลาก
+	-- Dragging (mouse/touch) disables scrolling for all scroll containers while dragging
 	local function dragify(hit, scrolls, onMove, onActive)
 		local active = false
 		local function freeze(v)
@@ -739,7 +739,7 @@ local function createWindow(config)
 		end))
 	end
 
-	-- popup ลอยที่เลเยอร์บนสุด (ไม่ดันแถวอื่น ไม่ถูกตัด)
+	-- floating popup on the top layer (does not push other rows or get clipped)
 	local function makePopup(header, h, scrolls, visFrame, onToggle)
 		local popup = mk("CanvasGroup", {
 			BackgroundColor3 = Color3.fromRGB(42, 42, 42),
@@ -805,7 +805,7 @@ local function createWindow(config)
 		return st
 	end
 
-	-- ล็อกคอมโพเนนต์: obj:Lock() = ล็อกเฉยๆ, obj:Lock("key") = ต้องใส่ key ถึงปลด, obj:Unlock()
+	-- Lock component: obj:Lock() = lock only, obj:Lock("key") = requires a key to unlock, obj:Unlock()
 	local function attachLock(f, obj, hook)
 		local ov = mk("TextButton", {
 			BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 1,
@@ -820,7 +820,7 @@ local function createWindow(config)
 		function obj:Lock(k)
 			locked, key = true, k
 			ov.Visible = true
-			tag.Text = k ~= nil and "LOCKED • แตะเพื่อใส่ Key" or "LOCKED"
+			tag.Text = k ~= nil and "LOCKED • Tap to enter Key" or "LOCKED"
 			tw(ov, "bg", FX_TWEEN, {BackgroundTransparency = 0.35})
 			if hook then hook(true) end
 		end
@@ -835,19 +835,19 @@ local function createWindow(config)
 
 		ov.MouseButton1Click:Connect(function()
 			if key == nil then return end
-			prompt("ใส่ Key", "ใส่ key เพื่อปลดล็อก", "key...", function(txt)
+			prompt("Enter Key", "Enter the key to unlock", "key...", function(txt)
 				if matchKey(key, txt) then
 					obj:Unlock()
-					notify("ปลดล็อกแล้ว", nil, 2, "success")
+					notify("Unlocked", nil, 2, "success")
 				else
-					notify("Key ไม่ถูกต้อง", nil, 2, "error")
+					notify("Invalid key", nil, 2, "error")
 				end
 			end)
 		end)
 		return obj
 	end
 
-	-- opts.Lock = true / opts.LockKey = "key" ใช้ตอนสร้างได้เลย
+	-- opts.Lock = true / opts.LockKey = "key" can be used directly when creating
 	local function finishObj(f, obj, opts, hook)
 		attachLock(f, obj, hook)
 		if type(opts) == "table" then
@@ -858,9 +858,9 @@ local function createWindow(config)
 	end
 
 	-- ============================================================
-	--  build: ตัวสร้างคอมโพเนนต์ทั้งหมด (ใช้ซ้ำกับ page / Box / ScrollBox / Popup)
-	--  host = Frame ที่ใส่คอมโพเนนต์ (มี UIListLayout), scrolls = scroll ที่ต้องหยุดตอนลาก
-	--  anims = รายการ element ที่เล่น reveal (nil = ไม่เล่น), visFrame = เฟรมที่ซ่อนแล้วต้องปิด popup
+	--  build: builder for all components (reused by page / Box / ScrollBox / Popup)
+	--  host = Frame containing components (with UIListLayout), scrolls = scrolling frames to disable while dragging
+	--  anims = elements that play the reveal animation (nil = disabled), visFrame = frame whose hiding should close the popup
 	-- ============================================================
 	local function build(host, scrolls, anims, visFrame)
 		local ui = {}
@@ -921,7 +921,7 @@ local function createWindow(config)
 		end
 
 		-- ---------- Button ----------
-		-- opts = Color3 หรือ {Color=, Lock=, LockKey=}
+		-- opts = Color3 or {Color=, Lock=, LockKey=}
 		function ui:Button(text, cb, opts)
 			local color = typeof(opts) == "Color3" and opts or (type(opts) == "table" and opts.Color) or nil
 			local base = color and 0.7 or ROW_BASE
@@ -935,7 +935,7 @@ local function createWindow(config)
 			return finishObj(f, obj, type(opts) == "table" and opts or nil)
 		end
 
-		-- ---------- Buttons: ปุ่ม 2-3 อันในแถวเดียว ----------
+		-- ---------- Buttons: 2-3 buttons in one row ----------
 		-- ui:Buttons({ {Text="A", Callback=fn, Color=Color3, Lock=true, LockKey="k"}, ... })
 		function ui:Buttons(list)
 			local f = entry(ROW_H, {BackgroundTransparency = 1})
@@ -982,8 +982,8 @@ local function createWindow(config)
 			return finishObj(f, obj, opts)
 		end
 
-		-- ---------- Box: กล่องใส่คอมโพเนนต์ได้ทุกอย่าง (คล้าย div) ----------
-		-- local b = ui:Box({Title="หัวข้อ", Height=nil(=ยืดตามเนื้อหา), Transparency=0.93})
+		-- ---------- Box: a container that can hold any component (similar to a div) ----------
+		-- local b = ui:Box({Title="Title", Height=nil(=auto-expands to fit content), Transparency=0.93})
 		function ui:Box(opts)
 			opts = opts or {}
 			local f = entry(opts.Height or 10, {
@@ -1001,7 +1001,7 @@ local function createWindow(config)
 			return sub
 		end
 
-		-- ---------- ScrollBox: กล่องสูงคงที่ มี scrollbar ของตัวเอง ----------
+		-- ---------- ScrollBox: fixed-height box with its own scrollbar ----------
 		function ui:ScrollBox(height, opts)
 			opts = opts or {}
 			local f = entry(height or 100, {BackgroundTransparency = opts.Transparency or 0.93})
@@ -1023,7 +1023,7 @@ local function createWindow(config)
 			return sub
 		end
 
-		-- ---------- Popup ใน body (กล่องลอยกลางหน้า ใส่คอมโพเนนต์ได้) ----------
+		-- ---------- Popup in body (floating centered box that can contain components) ----------
 		-- local p = ui:Popup({Title="..", Height=140, Width=nil}) ; p:Open() / p:Close()
 		function ui:Popup(opts)
 			return makeBodyPopup(opts)
@@ -1118,7 +1118,7 @@ local function createWindow(config)
 			return finishObj(f, obj, opts)
 		end
 
-		-- ---------- Stepper (− ค่า +) ----------
+		-- ---------- Stepper (− value +) ----------
 		function ui:Stepper(text, min, max, default, cb, step, opts)
 			step = step or 1
 			local f = entry(ROW_H)
@@ -1193,7 +1193,7 @@ local function createWindow(config)
 			return obj
 		end
 
-		-- ---------- Textbox (ชื่ออยู่ซ้าย ช่องพิมพ์อยู่ขวา) ----------
+		-- ---------- Textbox (label on the left, input field on the right) ----------
 		function ui:Textbox(text, placeholder, cb, opts)
 			local f = entry(ROW_H)
 			label(f, text, {Position = UDim2.new(0, PAD, 0, 0), Size = UDim2.new(0.4, -PAD, 1, 0)})
@@ -1220,8 +1220,8 @@ local function createWindow(config)
 			end)
 		end
 
-		-- ---------- Input (ช่องพิมพ์เต็มความกว้าง, MultiLine ได้) ----------
-		-- ui:Input("ชื่อ", "placeholder", cb, {MultiLine=true, Height=64, Live=false})
+		-- ---------- Input (full-width text field, supports MultiLine) ----------
+		-- ui:Input("Name", "placeholder", cb, {MultiLine=true, Height=64, Live=false})
 		function ui:Input(text, placeholder, cb, opts)
 			opts = opts or {}
 			local multi = opts.MultiLine == true
@@ -1420,7 +1420,7 @@ local function createWindow(config)
 		end
 
 		-- ---------- Keybind ----------
-		-- allowClear = false: กด Esc แล้วไม่ล้างปุ่ม
+		-- allowClear = false: pressing Esc does not clear the button
 		function ui:Keybind(text, default, cb, allowClear, opts)
 			local f = entry(ROW_H)
 			label(f, text, {Position = UDim2.new(0, PAD, 0, 0), Size = UDim2.new(0.6, 0, 1, 0)})
@@ -1461,7 +1461,7 @@ local function createWindow(config)
 		return ui
 	end
 
-	-- ==================== สร้างหน้า (ภายใน) ====================
+	-- ==================== Create page (internal) ====================
 	local function makePage(name, hasTab)
 		local e = {name = name, active = false, anims = {}}
 
@@ -1486,7 +1486,7 @@ local function createWindow(config)
 			table.insert(tabList, e)
 			button.MouseButton1Click:Connect(function() selectEntry(e) end)
 		else
-			e.order = 1000 -- หน้า Settings อยู่ "ขวาสุด" เสมอ (ใช้คิดทิศทางสไลด์)
+			e.order = 1000 -- The Settings page is always the "rightmost" (used to determine slide direction)
 		end
 
 		local scroll = mk("ScrollingFrame", {
@@ -1509,7 +1509,7 @@ local function createWindow(config)
 		return e
 	end
 
-	-- ==================== Popup ใน body ====================
+	-- ==================== Body Popup ====================
 	makeBodyPopup = function(opts)
 		opts = opts or {}
 		local H = opts.Height or 140
@@ -1606,8 +1606,8 @@ local function createWindow(config)
 	local toastOrder = 0
 	local aliveToasts = {}
 
-	-- notify("หัวข้อ", "ข้อความ", วินาที, "info|success|warn|error")
-	-- หรือ notify({Title=, Text=, Duration= (0 = ไม่หายเอง), Color=Color3, Kind=,
+	-- notify("Title", "Message", seconds, "info|success|warn|error")
+	-- or notify({Title=, Text=, Duration= (0 = stays until closed), Color=Color3, Kind=,
 	--             Buttons={ {Text=, Callback=, Color=, Keep=false} }})
 	notify = function(a, b, c, d)
 		local o
@@ -1692,7 +1692,7 @@ local function createWindow(config)
 				end)
 			end
 		else
-			-- ไม่มีปุ่ม: กดที่ toast เพื่อปิด
+			-- No button: click the toast to close
 			t.InputBegan:Connect(function(input)
 				if isPtr(input) then obj.Dismiss() end
 			end)
@@ -1823,8 +1823,8 @@ local function createWindow(config)
 		return dialog({
 			title = titleText, text = text,
 			buttons = {
-				{text = "ยกเลิก", callback = onNo},
-				{text = "ยืนยัน", primary = true, callback = onYes},
+				{text = "Cancel", callback = onNo},
+				{text = "Confirm", primary = true, callback = onYes},
 			},
 		})
 	end
@@ -1833,13 +1833,13 @@ local function createWindow(config)
 		return dialog({
 			title = titleText, text = text, input = placeholder or "",
 			buttons = {
-				{text = "ยกเลิก"},
-				{text = "ตกลง", primary = true, callback = onSubmit},
+				{text = "Cancel"},
+				{text = "OK", primary = true, callback = onSubmit},
 			},
 		})
 	end
 
-	-- ==================== หด/ขยาย ====================
+	-- ==================== Collapse/expand ====================
 	local SIZE_TWEEN_OUT = TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
 	local FADE_TWEEN_OUT = TweenInfo.new(0.18, QUAD_OUT, Enum.EasingDirection.Out)
 	local FADE_TWEEN_IN  = TweenInfo.new(0.30, QUAD_OUT, Enum.EasingDirection.Out, 0, false, 0.08)
@@ -1887,11 +1887,11 @@ local function createWindow(config)
 
 	collapse.MouseButton1Click:Connect(function() setCollapsed(not collapsed) end)
 
-	-- ==================== Window mode + ชิดขอบ + ปรับขนาด ====================
+	-- ==================== Window mode + edge snapping + resizing ====================
 	local MODE_TWEEN = TweenInfo.new(0.5, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
 	local SNAP_TWEEN = TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
 
-	-- ฉากมืดตอนชิดขอบ (กดเพื่อกลับ)
+	-- dim overlay when snapped to the edge (click to return)
 	local snapDim = mk("TextButton", {
 		Name = "snapDim", BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 1,
 		Size = UDim2.fromScale(1, 1), ZIndex = 60, Visible = false,
@@ -1942,7 +1942,7 @@ local function createWindow(config)
 		setMode(mode == "dock" and "window" or "dock")
 	end)
 
-	-- มุมสำหรับปรับขนาด (เฉพาะ window mode)
+	-- resize corner (window mode only)
 	local corners = {
 		{ax = 0, ay = 0, sx = -1, sy = -1, size = 14},
 		{ax = 1, ay = 0, sx = 1,  sy = -1, size = 7},
@@ -1966,7 +1966,7 @@ local function createWindow(config)
 		end)
 	end
 
-	-- ---------- ลากหน้าต่างจาก Title ----------
+	-- ---------- Drag the window from the Title ----------
 	local dragging = false
 	local dragStart = Vector3.zero
 	local sDockX, sWinX, sWinY = 0, 0, 0
@@ -2019,7 +2019,7 @@ local function createWindow(config)
 		resizing = nil
 		if dragging then
 			dragging = false
-			-- ปล่อยที่ขอบจอใน window mode = หด + มืด + เหลือติ่งโผล่
+			-- Release at the screen edge in window mode = shrink + dim + leave a visible tab
 			if mode == "window" and not snapped and blend.Value > 0.9 then
 				local s = screenGui.AbsoluteSize
 				if winX <= EDGE then snapTo("left")
@@ -2030,7 +2030,7 @@ local function createWindow(config)
 		end
 	end))
 
-	-- ---------- ลูปหลัก: คำนวณขนาด/ตำแหน่งทุกเฟรม ----------
+	-- ---------- Main loop: calculate size/position every frame ----------
 	local lastBody
 	local function approach(cur, tgt, dt)
 		if math.abs(tgt - cur) < 0.05 then return tgt end
@@ -2048,11 +2048,11 @@ local function createWindow(config)
 		local Hw = TITLE_HEIGHT + winBody * ca
 		local H = lerp(Hd, Hw, b)
 
-		-- dock: ลากแกน X ชิดมุมล่างขวา
+		-- dock: drag along the X-axis toward the bottom-right corner
 		dockTX = math.clamp(dockTX, math.min(-(s.X - WIDTH), -RIGHT), -RIGHT)
 		dockCX = approach(dockCX, dockTX, dt)
 
-		-- window: ตำแหน่งเป้าหมาย (ปกติ หรือโผล่ติ่งตอนชิดขอบ)
+		-- window: target position (normal or showing a tab when snapped to the edge)
 		local tx, ty
 		if snapped then
 			local sw, sh = winW * SNAP_SCALE, Hw * SNAP_SCALE
@@ -2096,7 +2096,7 @@ local function createWindow(config)
 		end
 	end))
 
-	-- ==================== ซ่อน/แสดง (Hotkey) และ Kill ====================
+	-- ==================== Hide/Show (Hotkey) and Kill ====================
 	local shown, closing = true, false
 	local HIDE_TWEEN = TweenInfo.new(0.25, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
 	local OUTRO = TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
@@ -2140,7 +2140,7 @@ local function createWindow(config)
 		end)
 	end
 
-	-- ==================== หน้า Settings หลัก (ภายใน library เท่านั้น) ====================
+	-- ==================== Main Settings page (library-internal only) ====================
 	settingsEntry = makePage("__settings", false)
 	settingFx = addButtonFx(setting, function()
 		return currentTab == settingsEntry and 0.6 or 0.9
@@ -2161,7 +2161,7 @@ local function createWindow(config)
 		s:ColorPicker("Main Color", accent, function(c) setAccent(c) end)
 		s:Divider()
 		s:Button("Kill UI", function()
-			confirm("Kill UI?", "ปิดและลบ UI นี้ทิ้งทั้งหมด", kill)
+			confirm("Kill UI?", "Close and completely remove this UI", kill)
 		end, RED)
 		s:Label(NAME .. " • Tomato UI Library v" .. Library.Version)
 	end
@@ -2186,7 +2186,7 @@ local function createWindow(config)
 		if not closing then setCollapsed(false) end
 	end)
 
-	-- ==================== Window API (สิ่งเดียวที่สคริปต์ภายนอกเข้าถึงได้) ====================
+	-- ==================== Window API (the only part accessible to external scripts) ====================
 	local Window = {}
 
 	function Window:AddPage(name)
@@ -2202,7 +2202,7 @@ local function createWindow(config)
 	return Window
 end
 
--- object ว่างที่เรียกเมธอดไหนก็ไม่ error (ใช้ตอน CreateWindow ล้มเหลว เพื่อให้สคริปต์ที่เหลือไม่พังตาม)
+-- empty object whose methods never error (used when CreateWindow fails so the rest of the script can continue)
 local function dummy()
 	local d = {}
 	return setmetatable(d, {__index = function() return function() return d end end})
