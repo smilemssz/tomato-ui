@@ -2,7 +2,7 @@ import { defineConfig } from 'vitepress'
 
 // Docs are published at https://smilemssz.github.io/tomato-ui/
 export default defineConfig({
-  title: 'Tomato UI',
+  title: 'Tomato GUI',
   description: 'A Roblox executor UI library: windows, tabs, 25+ components, stacking, cookies and an error log.',
   base: '/tomato-ui/',
   cleanUrls: true,
