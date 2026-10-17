@@ -1,55 +1,58 @@
-name: Docs Validation
+name: Docs
 
 on:
   push:
-    paths:
-      - "docs/**"
-      - "README.md"
-      - ".github/workflows/docs-lockfile-fix.yml"
+    branches:
+      - main
   pull_request:
-    paths:
-      - "docs/**"
-      - "README.md"
-      - ".github/workflows/docs-lockfile-fix.yml"
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
   contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
 
 jobs:
-  validate-docs:
-    name: Validate documentation
+  build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      # No setup-node or dependency cache is needed for Markdown-only docs.
-      - name: Check required documentation
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -f README.md
-          test -d docs
-          echo "README.md and docs/ exist."
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          # Intentionally omit "cache: npm" because this repository
+          # currently has no package-lock.json / npm-shrinkwrap.json / yarn.lock.
 
-      - name: Check Markdown files are not empty
-        shell: bash
-        run: |
-          set -euo pipefail
-          mapfile -d '' files < <(find docs -type f -name '*.md' -print0)
+      - name: Install dependencies
+        run: npm install
 
-          if [ "${#files[@]}" -eq 0 ]; then
-            echo "::error::No Markdown files were found under docs/"
-            exit 1
-          fi
+      - name: Build docs
+        run: npm run docs:build
 
-          for file in "${files[@]}"; do
-            if ! grep -q '[^[:space:]]' "$file"; then
-              echo "::error file=$file::Markdown file is empty"
-              exit 1
-            fi
-          done
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
 
-          echo "All Markdown files are non-empty."
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./docs/.vitepress/dist
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
