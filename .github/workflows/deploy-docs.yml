@@ -1,43 +1,50 @@
-name: Deploy docs to GitHub Pages
+
+name: Docs Validation
 
 on:
   push:
-    branches: [main]
+    paths:
+      - "docs/**"
+      - "README.md"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    paths:
+      - "docs/**"
+      - "README.md"
+      - ".github/workflows/docs.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: pages
-  cancel-in-progress: false
 
 jobs:
-  build:
+  validate-docs:
+    name: Validate documentation
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-      - run: npm install
-      - run: npm run docs:build
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: docs/.vitepress/dist
 
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check required files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f README.md
+          test -d docs
+          echo "Required documentation files exist."
+
+      - name: Check for empty Markdown files
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          find docs -type f -name '*.md' -print0 |
+          while IFS= read -r -d '' file; do
+            if ! grep -q '[^[:space:]]' "$file"; then
+              echo "::error file=$file::Markdown file is empty"
+              exit 1
+            fi
+          done
+
+          echo "Markdown files passed the basic check."
