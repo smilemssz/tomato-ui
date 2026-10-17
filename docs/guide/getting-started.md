@@ -16,7 +16,24 @@ local Window = Library:CreateWindow({
 })
 ```
 
-`Window:AddPage` returns a **page UI**. Every component is a method of a page UI.
+### CreateWindows
+
+'''lua
+--                         Name Page   Icon lucide
+--                            VV          VV
+local Main = Window:AddPage("Main", "lucide:home")
+
+Main:Section("Player")
+
+Main:Toggle("Auto Farm", false, function(on) print("AutoFarm", on) end)
+
+Main:Slider("WalkSpeed", 16, 100, 16, function(v) print(v) end)
+
+Main:Button("Notify", function()
+    Window:Notify("Hello", "It works", 3, "success")
+end)
+
+'''
 
 ::: tip
 Callbacks are protected. If your callback errors, the [Error Log](/systems/error-log) opens instead of your script stopping.
