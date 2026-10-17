@@ -18,7 +18,7 @@ local Window = Library:CreateWindow({
 
 ### CreateWindows
 
-'''lua
+```lua
 --                         Name Page   Icon lucide
 --                            VV          VV
 local Main = Window:AddPage("Main", "lucide:home")
@@ -33,7 +33,7 @@ Main:Button("Notify", function()
     Window:Notify("Hello", "It works", 3, "success")
 end)
 
-'''
+```
 
 ::: tip
 Callbacks are protected. If your callback errors, the [Error Log](/systems/error-log) opens instead of your script stopping.
