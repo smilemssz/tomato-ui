@@ -7,7 +7,7 @@ hero:
   actions:
     - theme: brand
       text: Get started
-      link: /start/getting-started
+      link: /guide/getting-started
     - theme: alt
       text: GitHub
       link: https://github.com/smilemssz/tomato-ui
