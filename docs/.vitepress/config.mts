@@ -74,6 +74,6 @@ export default defineConfig({
       text: 'Edit this page on GitHub'
     },
     outline: [2, 3],
-    footer: { message: 'Tomato UI documentation', copyright: 'Made with VitePress' }
+    footer: { message: 'Tomato GUI documentation', copyright: 'Made with VitePress' }
   }
 })
