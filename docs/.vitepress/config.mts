@@ -22,9 +22,14 @@ export default defineConfig({
 
     sidebar: [
       {
+        text: 'Get started',
+        items: [
+          { text: 'Loadstring', link: '/start/getting-started' },
+        ]
+      },
+      {
         text: 'Guide',
         items: [
-          { text: 'Getting started', link: '/guide/getting-started' },
           { text: 'Core concepts', link: '/guide/concepts' },
           { text: 'CreateWindow config', link: '/guide/config' },
           { text: 'Window API', link: '/guide/window-api' },
