@@ -6,7 +6,7 @@ Tomato UI is loaded with one `loadstring` call. The file ends with `return Libra
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/smilemssz/tomato-ui/refs/heads/main/main.lua"))()
 ```
 
-## Your first window
+## CreateWindow
 
 ```lua
 local Window = Library:CreateWindow({
@@ -14,14 +14,6 @@ local Window = Library:CreateWindow({
     Accent = Color3.fromRGB(255, 99, 71),
     Hotkey = Enum.KeyCode.RightShift,
 })
-
-local Main = Window:AddPage("Main", "lucide:home")
-Main:Section("Player")
-Main:Toggle("Auto Farm", false, function(on) print("AutoFarm", on) end)
-Main:Slider("WalkSpeed", 16, 100, 16, function(v) print(v) end)
-Main:Button("Notify", function()
-    Window:Notify("Hello", "It works", 3, "success")
-end)
 ```
 
 `Window:AddPage` returns a **page UI**. Every component is a method of a page UI.
